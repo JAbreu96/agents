@@ -104,3 +104,5 @@ Print the full email ready to send, including:
 - The signature block
 
 Keep the tone warm, direct, and confident — not stiff or overly formal. No fluff.
+
+**Never mention** handing off work, handoff documents, or transitions to other engineers — it signals lack of ownership.
