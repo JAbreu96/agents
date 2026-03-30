@@ -16,6 +16,18 @@ If any of these are missing, ask for them before continuing.
 
 ---
 
+## Step 0 — Research the company
+
+Before drafting the email, use WebSearch to find recent news about the company (last 12 months). Look for:
+- Funding rounds, acquisitions, or valuation milestones
+- Product launches or major feature releases
+- Notable partnerships, customer wins, or growth metrics
+- Press coverage or founder/executive interviews
+
+Keep a note of 1–2 findings worth referencing. Only use something in the email if it's specific, verifiable, and genuinely relevant — don't force a mention if nothing stands out.
+
+---
+
 ## Joelchrist's Background & Projects (Meta, Apr 2025 – Mar 2026)
 
 Use this dossier to select the most relevant 2–3 accomplishments when writing paragraph 2. Pick projects that best match the role's tech stack, scope, or domain.
@@ -65,7 +77,7 @@ Open with who you are, where you currently work (Meta), and a specific, genuine 
 Highlight 2–3 of the most relevant projects from the dossier above, matched to what the role requires. Be specific — name the project, what you built, and the impact. Keep it 3–4 sentences max. Do not list everything; pick what's most relevant.
 
 **Paragraph 3 — Closing & Follow-up**
-Express enthusiasm, keep it brief. End with a clear ask: *"Would love to find 20–30 minutes to connect — what's the best time for a quick call?"* or similar natural variation.
+This is the most confident paragraph. If the WebSearch from Step 0 surfaced something specific and recent — a funding round, a product launch, a notable partnership, a growth metric — open with it naturally (e.g. "Saw that you just closed your seed with Maveron..." or "The recent [X] caught my eye..."). If nothing newsworthy was found, open instead with a specific observation about the company's mission or traction from the job description itself. Then make a direct, confident case for why you're a strong fit: name 1–2 concrete reasons (skills, mindset, or past experience) that map directly to what they need. Close with a clear ask: *"Would love to find 20–30 minutes to connect — what's the best time for a quick call?"* or a natural variation. Aim for 3–5 sentences total.
 
 ---
 
