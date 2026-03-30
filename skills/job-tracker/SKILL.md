@@ -57,6 +57,7 @@ From the fetched content, extract:
   - **Compensation**: salary range, equity details, every listed benefit and perk
   - **What to remove**: legal disclaimers, DEI/EEO boilerplate, E-Verify notices, recruitment fraud warnings, interview process descriptions, and generic filler phrases ("we are an equal opportunity employer", "join our team", etc.)
   - Use bullet points. Preserve specific numbers, names, and technical terms exactly as written.
+  - Target up to **20,000 characters** — do not truncate content that fits within this limit.
 
 If the extracted content is too short (under 100 chars), ask the user to paste the job description before continuing.
 
