@@ -49,13 +49,14 @@ From the fetched content, extract:
 - **Job title** — main heading or page title
 - **Company** — from structured data, headings, or URL slug
 - **Location** — city/state/remote, or "(unknown location)"
-- **Summary** — refine the raw description into these sections (skip any with no content):
-  - **Company Context**: what the company does, stage, mission
-  - **Role & Responsibilities**: day-to-day work
-  - **Required Skills & Experience**: must-have qualifications, tech stack, years of experience
-  - **Bonus** (optional): nice-to-haves
-  - **Compensation**: salary range, equity, notable benefits
-  - Remove all legal disclaimers, DEI boilerplate, E-Verify notices, recruitment fraud warnings, and interview process descriptions. Use bullet points. Be concise.
+- **Summary** — preserve as much meaningful content as possible from the raw description, organized into these sections (skip any with no content):
+  - **Company Context**: what the company does, mission, scale, stage, culture — include specific metrics, customer counts, growth stats, or notable customers if mentioned
+  - **Role & Responsibilities**: full list of day-to-day responsibilities — do not condense or merge bullets, keep all specifics
+  - **Required Skills & Experience**: all must-have qualifications, full tech stack with versions/frameworks, years of experience, degree requirements
+  - **Bonus** (optional): all nice-to-haves, preferred qualifications
+  - **Compensation**: salary range, equity details, every listed benefit and perk
+  - **What to remove**: legal disclaimers, DEI/EEO boilerplate, E-Verify notices, recruitment fraud warnings, interview process descriptions, and generic filler phrases ("we are an equal opportunity employer", "join our team", etc.)
+  - Use bullet points. Preserve specific numbers, names, and technical terms exactly as written.
 
 If the extracted content is too short (under 100 chars), ask the user to paste the job description before continuing.
 
