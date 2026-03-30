@@ -148,8 +148,8 @@ class JobTrackerAgent:
         summary = summary.replace("&nbsp;", " ").replace("&amp;", "&")
 
         # Limit raw summary before sending to LLM
-        if summary and len(summary) > 10000:
-            summary = summary[:10000] + "..."
+        if summary and len(summary) > 20000:
+            summary = summary[:20000] + "..."
 
         # Refine summary with Claude
         if summary:

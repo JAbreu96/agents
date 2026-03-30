@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "gsheets": {
+      "command": "npx",
+      "args": ["-y", "mcp-gsheets@latest"],
+      "env": {
+        "GOOGLE_PROJECT_ID": "agents-491602",
+        "GOOGLE_APPLICATION_CREDENTIALS": "/Users/joelchristabreu/Desktop/agents-491602-1660395a92f0.json"
+      }
+    }
+  }
+}
