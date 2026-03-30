@@ -16,15 +16,17 @@ If any of these are missing, ask for them before continuing.
 
 ---
 
-## Step 0 — Research the company
+## Step 0 — Research the company and confirm news to include
 
-Before drafting the email, use WebSearch to find recent news about the company (last 12 months). Look for:
-- Funding rounds, acquisitions, or valuation milestones
-- Product launches or major feature releases
-- Notable partnerships, customer wins, or growth metrics
-- Press coverage or founder/executive interviews
+1. Use WebSearch to find recent news about the company (last 12 months). Look for:
+   - Funding rounds, acquisitions, or valuation milestones
+   - Product launches or major feature releases
+   - Notable partnerships, customer wins, or growth metrics
+   - Press coverage or founder/executive interviews
 
-Keep a note of 1–2 findings worth referencing. Only use something in the email if it's specific, verifiable, and genuinely relevant — don't force a mention if nothing stands out.
+2. Present a short numbered list of the most interesting findings to the user (2–4 items max). Ask: *"Which of these would you like to mention in the email, if any? You can pick one, suggest your own, or say 'none'."*
+
+3. Wait for the user's response before drafting the email. Use their chosen news in paragraph 3.
 
 ---
 
