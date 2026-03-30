@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.job_digest import classify_status, compute_stats, build_digest
+from src.job_digest import classify_status, compute_stats, build_digest, _extract_gid_from_url
 
 
 def _row(title="Engineer", date_added=None, date_applied=""):
@@ -92,3 +92,28 @@ class TestBuildDigest:
         assert digest["rows"][0]["status"] == "applied"
         assert "stats" in digest
         assert digest["stats"]["total"] == 2
+
+
+class TestExtractGidFromUrl:
+    def test_gid_in_fragment(self):
+        url = "https://docs.google.com/spreadsheets/d/ABC123/edit?gid=138342806#gid=138342806"
+        assert _extract_gid_from_url(url) == 138342806
+
+    def test_gid_in_query_only(self):
+        url = "https://docs.google.com/spreadsheets/d/ABC123/edit?gid=999"
+        assert _extract_gid_from_url(url) == 999
+
+    def test_gid_in_fragment_only(self):
+        url = "https://docs.google.com/spreadsheets/d/ABC123/edit#gid=42"
+        assert _extract_gid_from_url(url) == 42
+
+    def test_no_gid(self):
+        url = "https://docs.google.com/spreadsheets/d/ABC123/edit"
+        assert _extract_gid_from_url(url) is None
+
+    def test_non_url(self):
+        assert _extract_gid_from_url("My Spreadsheet") is None
+
+    def test_default_spreadsheet_url(self):
+        url = "https://docs.google.com/spreadsheets/d/1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q/edit?gid=138342806#gid=138342806"
+        assert _extract_gid_from_url(url) == 138342806

@@ -7,6 +7,7 @@ import re
 import sys
 from datetime import date, datetime, timedelta
 from typing import Optional
+from urllib.parse import urlparse, parse_qs
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -18,6 +19,20 @@ from google.oauth2.service_account import Credentials
 
 DEFAULT_SPREADSHEET = "https://docs.google.com/spreadsheets/d/1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q/edit"
 DEFAULT_WORKSHEET = "Sheet1"
+
+
+def _extract_gid_from_url(url: str) -> Optional[int]:
+    """Parse the gid (worksheet tab ID) from a Google Sheets URL, if present."""
+    # gid appears as a query param (?gid=...) or fragment (#gid=...)
+    parsed = urlparse(url)
+    for source in [parsed.query, parsed.fragment]:
+        params = parse_qs(source)
+        if "gid" in params:
+            try:
+                return int(params["gid"][0])
+            except (ValueError, IndexError):
+                pass
+    return None
 
 # Column indices (0-based) matching job_agent.py schema
 COL_TITLE = 0
@@ -38,14 +53,25 @@ def _sheet_client(service_account_json: str) -> gspread.Client:
     return gspread.authorize(creds)
 
 
-def _open_worksheet(client: gspread.Client, spreadsheet: str, worksheet_name: str):
-    spreadsheet = spreadsheet.strip()
-    if spreadsheet.startswith("http://") or spreadsheet.startswith("https://"):
-        spread = client.open_by_url(spreadsheet)
-    elif re.match(r"^[A-Za-z0-9-_]+$", spreadsheet):
-        spread = client.open_by_key(spreadsheet)
+def _open_worksheet(client: gspread.Client, spreadsheet: str, worksheet_name: str, gid: Optional[int] = None):
+    url = spreadsheet.strip()
+
+    # Auto-extract gid from URL if not explicitly provided
+    if gid is None and (url.startswith("http://") or url.startswith("https://")):
+        gid = _extract_gid_from_url(url)
+
+    if url.startswith("http://") or url.startswith("https://"):
+        spread = client.open_by_url(url)
+    elif re.match(r"^[A-Za-z0-9-_]+$", url):
+        spread = client.open_by_key(url)
     else:
-        spread = client.open(spreadsheet)
+        spread = client.open(url)
+
+    # GID-based lookup (most reliable when a specific tab is requested)
+    if gid is not None:
+        for ws in spread.worksheets():
+            if ws.id == gid:
+                return ws
 
     for candidate in [worksheet_name, "Sheet1", "job tracker", "Job Tracker"]:
         try:
@@ -66,6 +92,7 @@ def get_all_rows(
     spreadsheet: str = DEFAULT_SPREADSHEET,
     worksheet_name: str = DEFAULT_WORKSHEET,
     service_account_json: Optional[str] = None,
+    gid: Optional[int] = None,
 ) -> list[dict]:
     """Read all data rows from the job tracker sheet, skipping header and empty rows."""
     if service_account_json is None:
@@ -77,7 +104,7 @@ def get_all_rows(
         )
 
     client = _sheet_client(service_account_json)
-    ws = _open_worksheet(client, spreadsheet, worksheet_name)
+    ws = _open_worksheet(client, spreadsheet, worksheet_name, gid=gid)
     all_values = ws.get_all_values()
 
     rows = []
@@ -157,9 +184,10 @@ def build_digest(
     spreadsheet: str = DEFAULT_SPREADSHEET,
     worksheet_name: str = DEFAULT_WORKSHEET,
     service_account_json: Optional[str] = None,
+    gid: Optional[int] = None,
 ) -> dict:
     """Read the sheet, classify rows, compute stats, return digest dict."""
-    rows = get_all_rows(spreadsheet, worksheet_name, service_account_json)
+    rows = get_all_rows(spreadsheet, worksheet_name, service_account_json, gid=gid)
     for row in rows:
         row["status"] = classify_status(row)
     stats = compute_stats(rows)
@@ -188,6 +216,12 @@ def main() -> None:
         default=None,
         help="Path to Google service account JSON credentials",
     )
+    parser.add_argument(
+        "--gid",
+        default=None,
+        type=int,
+        help="Worksheet tab GID (auto-extracted from spreadsheet URL if present)",
+    )
     args = parser.parse_args()
 
     try:
@@ -195,6 +229,7 @@ def main() -> None:
             spreadsheet=args.spreadsheet,
             worksheet_name=args.worksheet,
             service_account_json=args.service_account_json,
+            gid=args.gid,
         )
         print(json.dumps(digest, indent=2))
     except Exception as exc:
