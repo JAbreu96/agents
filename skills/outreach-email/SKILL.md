@@ -1,6 +1,6 @@
 ---
 name: outreach-email
-description: Draft a short, personalized outreach email for a job opportunity — 3 paragraphs covering intro/interest, relevant skills from Meta experience, and a closing ask for a call. Use when the user wants to reach out to a recruiter or contact about a role.
+description: Draft a short, personalized outreach email for a job opportunity — 3 paragraphs covering intro/interest, relevant skills from former Meta experience, and a closing ask for a call. Use when the user wants to reach out to a recruiter or contact about a role.
 argument-hint: "[recipient name] [recipient email] [job description or URL]"
 ---
 
@@ -30,7 +30,7 @@ If any of these are missing, ask for them before continuing.
 
 ---
 
-## Joelchrist's Background & Projects (Meta, Apr 2025 – Mar 2026)
+## Joelchrist's Background & Projects (formerly Meta, Apr 2025 – Mar 2026)
 
 Use this dossier to select the most relevant 2–3 accomplishments when writing paragraph 2. Pick projects that best match the role's tech stack, scope, or domain.
 
@@ -73,7 +73,7 @@ Use this dossier to select the most relevant 2–3 accomplishments when writing 
 Write the email in exactly **3 short paragraphs**:
 
 **Paragraph 1 — Intro & Interest**
-Open with who you are, where you currently work (Meta), and a specific, genuine reason why this company or role caught your attention. Reference something concrete from the job description or company (product, mission, tech, growth stage). Keep it 2–3 sentences.
+Open with who you are, that you previously worked at Meta (past tense — you no longer work there), and a specific, genuine reason why this company or role caught your attention. Reference something concrete from the job description or company (product, mission, tech, growth stage). Keep it 2–3 sentences.
 
 **Paragraph 2 — Relevant Skills**
 Highlight 2–3 of the most relevant projects from the dossier above, matched to what the role requires. Be specific — name the project, what you built, and the impact. Keep it 3–4 sentences max. Do not list everything; pick what's most relevant.
