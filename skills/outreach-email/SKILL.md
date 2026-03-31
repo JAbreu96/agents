@@ -106,3 +106,11 @@ Print the full email ready to send, including:
 Keep the tone warm, direct, and confident — not stiff or overly formal. No fluff.
 
 **Never mention** handing off work, handoff documents, or transitions to other engineers — it signals lack of ownership.
+
+---
+
+## Gmail Draft
+
+After printing the email, automatically save it as a Gmail draft using the `gmail_create_draft` tool. Do **not** send it.
+
+If the user requests edits, revise the email, create a new draft with `gmail_create_draft`, and tell the user the old draft ID so they can delete it manually from Gmail.
