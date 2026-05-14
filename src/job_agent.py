@@ -413,23 +413,25 @@ class JobTrackerAgent:
         # try header-based detection
         for ws in spread.worksheets():
             headers = ws.row_values(1)
-            if headers and "Job Title" in headers and "Link" in headers:
+            if headers and "Job Title" in headers and ("Link" in headers or "Company" in headers):
                 return ws
 
         # fallback: create a target sheet
         target = table_name or worksheet_name or "job tracker"
         sh = spread.add_worksheet(title=target, rows=200, cols=25)
-        header = ["Job Title", "Job Summary", "Link", "Date Added", "Contacts", "Notes", "Date Applied"]
+        header = ["Company", "Job Title", "Job Summary", "Link", "Date Added", "Contacts", "Notes", "Outreach Date", "Date Applied"]
         sh.append_row(header, value_input_option="USER_ENTERED")
         return sh
 
     @classmethod
     def find_existing_row(cls, sh, url: str) -> Optional[int]:
-        """Return 1-based row index of the existing URL, or None if not found."""
+        """Return 1-based row index of the existing URL, or None if not found.
+        URL is in column D (index 3): A=Company, B=Job Title, C=Job Summary, D=Link.
+        """
         try:
             all_values = sh.get_all_values()
             for i, row in enumerate(all_values[1:], start=2):  # i is 1-based row index
-                if len(row) > 2 and row[2].strip() == url:
+                if len(row) > 3 and row[3].strip() == url:
                     return i
         except Exception as e:
             print(f"Warning: could not check for duplicates: {e}")
@@ -527,30 +529,32 @@ class JobTrackerAgent:
         elif not posted_date or posted_date == "(unknown date)":
             posted_date = str(date.today())
 
-        # Columns: Job Title, Job Summary, Link, Date Added, Contacts, Notes, Date Applied
-        # A            B            C      D            E         F      G
+        # Columns: Company, Job Title, Job Summary, Link, Date Added, Contacts, Notes, Outreach Date, Date Applied
+        # A          B          C             D      E             F         G         H               I
         new_row = [
+            record.company,
             record.title,
             record.summary,
             record.url,
             str(date.today()),  # Date Added — only written for new jobs
             record.contacts,
             record.notes,
+            "",  # Outreach Date — always left blank
             "",  # Date Applied — always left blank
         ]
 
         existing_row = cls.find_existing_row(sh, record.url)
         if existing_row is not None:
-            # Overwrite A:C (title, summary, link) and E:F (contacts, notes)
-            # Never touch D (Date Added) or G (Date Applied)
+            # Update A:C (company, title, summary) and F:G (contacts, notes)
+            # Never touch D (Link), E (Date Added), H (Outreach Date), or I (Date Applied)
             sh.update(
                 range_name=f"A{existing_row}:C{existing_row}",
                 values=[[new_row[0], new_row[1], new_row[2]]],
                 value_input_option="USER_ENTERED",
             )
             sh.update(
-                range_name=f"E{existing_row}:F{existing_row}",
-                values=[[new_row[4], new_row[5]]],
+                range_name=f"F{existing_row}:G{existing_row}",
+                values=[[new_row[5], new_row[6]]],
                 value_input_option="USER_ENTERED",
             )
             print(f"Overwrote existing job at row {existing_row} (preserved Date Added & Date Applied).")

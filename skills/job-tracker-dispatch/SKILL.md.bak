@@ -1,0 +1,325 @@
+---
+name: job-tracker-dispatch
+description: Track a job posting — fetch a job URL, extract job details (title, company, location, summary), research the company, look up contacts via Hunter.io, and log it to the Google Sheets job tracker using the Claude-in-Chrome extension. Use when the user provides a job posting URL and wants to save it to their tracker. Does NOT require a Google Sheets MCP connector — uses the browser directly.
+argument-hint: [job-posting-url]
+---
+
+Track the job posting at `$ARGUMENTS` by following these steps.
+
+> **Dispatch session requirements:**
+> - The Claude-in-Chrome extension must be connected (`mcp__Claude_in_Chrome__*` tools must be available).
+> - A Chrome browser window must be open and accessible.
+> - The Google Sheet will be navigated to automatically — it does not need to be open beforehand.
+> - `mcp__workspace__bash` is available for terminal/CLI operations (curl, jq, python, etc.).
+> - `mcp__computer-use__*` tools are used to execute commands on the Mac via Terminal. Request access before first use: `mcp__computer-use__request_access(apps=["Terminal"], reason="Run job tracker script", clipboardWrite=true)`
+
+**Tool selection guide:**
+| Task | Preferred tool |
+|------|---------------|
+| API calls (Hunter.io, Greenhouse, Lever) | `mcp__workspace__bash` via `curl` |
+| Fetching dynamic job pages | `mcp__Claude_in_Chrome__get_page_text` |
+| Web search | `WebSearch` |
+| Running Mac terminal commands | `mcp__computer-use__write_clipboard` + Terminal Edit > Paste |
+| Writing Google Sheets (preferred) | `src/job_agent.py` via clipboard → Terminal (see Step 5A/6A) |
+| Writing Google Sheets (fallback) | `mcp__Claude_in_Chrome__*` (Name Box method) |
+| Text processing / JSON parsing | `mcp__workspace__bash` via `python3` or `jq` |
+
+## Spreadsheet info
+- Spreadsheet ID: `1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q`
+- Sheet URL: `https://docs.google.com/spreadsheets/d/1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q/edit#gid=0`
+- Worksheet: `Sheet1`
+- Column layout (1-based): A=Company, B=Job Title, C=Job Summary, D=Link, E=Date Added, F=Contacts, G=Notes, H=Outreach Date, I=Date Applied
+
+---
+
+## Step 1 — Fetch the job posting
+
+If no URL was given, ask for one before continuing.
+
+**If the URL contains `linkedin.com`:** LinkedIn blocks automated fetching. Ask the user to provide manually:
+- Job title
+- Company name
+- Location
+- Job description (full text)
+
+Wait for their response, then skip to Step 2 with that data.
+
+**If the URL matches Greenhouse** (`greenhouse.io/{company}/jobs/{id}`):
+Use `mcp__workspace__bash` to fetch from the Greenhouse API:
+```bash
+curl -s "https://boards-api.greenhouse.io/v1/boards/{company}/jobs/{id}" | python3 -c "
+import sys, json, re
+d = json.load(sys.stdin)
+print('Title:', d.get('title'))
+print('Location:', d.get('location', {}).get('name'))
+print('Updated:', d.get('updated_at', '')[:10])
+print('Description:', re.sub('<[^>]+>', '', d.get('content', '')))
+"
+```
+Derive the company name from the URL slug (e.g. `justworks` → `Justworks`).
+
+**If the URL matches Lever** (`jobs.lever.co/{company}/{uuid}`):
+Use `mcp__workspace__bash` to fetch from the Lever API:
+```bash
+curl -s "https://api.lever.co/v0/postings/{company}/{uuid}" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('Title:', d.get('text'))
+print('Location:', d.get('categories', {}).get('location'))
+import datetime
+ms = d.get('createdAt', 0)
+print('Date:', datetime.datetime.fromtimestamp(ms/1000).strftime('%Y-%m-%d'))
+print('Description:', d.get('descriptionPlain') or d.get('description', ''))
+"
+```
+
+**Otherwise:** Fetch the page using `mcp__Claude_in_Chrome__get_page_text` (navigate first if needed). Extract the job description from JSON-LD `application/ld+json` structured data if present (`description`, `hiringOrganization.name`, `jobLocation.address`, `datePosted`). Fall back to `<h1>` for title and main content areas for description.
+
+---
+
+## Step 2 — Extract and refine job details
+
+From the fetched content, extract:
+- **Job title** — main heading or page title
+- **Company** — from structured data, headings, or URL slug
+- **Location** — city/state/remote, or "(unknown location)"
+- **Summary** — preserve as much meaningful content as possible from the raw description, organized into these sections (skip any with no content):
+  - **Company Context**: what the company does, mission, scale, stage, culture — include specific metrics, customer counts, growth stats, or notable customers if mentioned
+  - **Role & Responsibilities**: full list of day-to-day responsibilities — do not condense or merge bullets, keep all specifics
+  - **Required Skills & Experience**: all must-have qualifications, full tech stack with versions/frameworks, years of experience, degree requirements
+  - **Bonus** (optional): all nice-to-haves, preferred qualifications
+  - **Compensation**: salary range, equity details, every listed benefit and perk
+  - **What to remove**: legal disclaimers, DEI/EEO boilerplate, E-Verify notices, recruitment fraud warnings, interview process descriptions, and generic filler phrases ("we are an equal opportunity employer", "join our team", etc.)
+  - Use bullet points. Preserve specific numbers, names, and technical terms exactly as written.
+  - Target up to **20,000 characters** — do not truncate content that fits within this limit.
+
+If the extracted content is too short (under 100 chars), ask the user to paste the job description before continuing.
+
+---
+
+## Step 3 — Research the company
+
+Use WebSearch to find current information on the company. Return a structured notes block with:
+
+**Recent News** (last 12 months): 2–3 bullet points on notable events, launches, or controversies
+**Glassdoor**: Overall rating (X/5), 2–3 bullet points on top pros and cons
+**Funding**: Latest round — stage, amount, date, lead investors
+
+Omit any section where no reliable data is found. Be factual and concise. End the block with a **Sources** list of URLs used.
+
+---
+
+## Step 4 — Look up contacts via Hunter.io
+
+Determine the domain to search:
+- If the URL is from a known job board domain (greenhouse.io, lever.co, ashbyhq.com, gem.com, builtin.com, builtinnyc.com, workday.com, myworkdayjobs.com, icims.com, jobvite.com, smartrecruiters.com, taleo.net, indeed.com, glassdoor.com), search by **company name** instead of domain.
+- Otherwise, use the domain from the job URL (strip `www.`).
+
+Use `mcp__workspace__bash` with `curl` to call the Hunter.io API directly — this is the most reliable method and requires no Chrome navigation:
+
+```bash
+# Search by domain:
+curl -s "https://api.hunter.io/v2/domain-search?domain={domain}&api_key=776bd4e0680a27079ab151d0da7cc920d1c06994&limit=10&seniority=senior,executive&department=engineering,executive,management" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+emails = d.get('data', {}).get('emails', [])
+for e in emails[:5]:
+    name = f\"{e.get('first_name','')} {e.get('last_name','')}\".strip()
+    title = e.get('position', 'Unknown title')
+    email = e.get('value', '')
+    conf = e.get('confidence', '?')
+    print(f'{name} — {title} — {email} ({conf}% confidence)')
+"
+```
+
+Or search by company name (when URL is from a known job board):
+```bash
+curl -s "https://api.hunter.io/v2/domain-search?company={company_name}&api_key=776bd4e0680a27079ab151d0da7cc920d1c06994&limit=10&seniority=senior,executive&department=engineering,executive,management" | python3 -c "..."
+```
+
+Format up to 5 contacts as:
+```
+Full Name — Job Title — email@company.com (XX% confidence)
+```
+One per line. If no contacts are found, leave this field blank.
+
+---
+
+## Step 5 — Choose a sheet-writing path
+
+Two paths are available for Steps 5–6. Choose based on what's accessible:
+
+| Path | When to use |
+|------|-------------|
+| **A — Python executable** (`src/job_agent.py`) | Preferred. Use when running from a Mac terminal with packages installed and Google credentials accessible. Handles duplicate detection, column mapping, and API-based writes — no Chrome needed for the sheet. |
+| **B — Chrome extension** | Fallback. Use when the Python path isn't available (e.g. running in a sandboxed environment where gspread/google-auth can't be installed). |
+
+---
+
+## Step 5A / 6A — Write via Python executable (preferred)
+
+**Prerequisites** (one-time setup on the Mac):
+```bash
+cd /Users/joelchristabreu/Documents/projects/agents
+pip install gspread google-auth requests beautifulsoup4 python-dotenv anthropic
+```
+
+Create or confirm `/Users/joelchristabreu/Documents/projects/agents/.env` contains:
+```
+GOOGLE_APPLICATION_CREDENTIALS=/Users/joelchristabreu/Desktop/agents-491602-1660395a92f0.json
+HUNTER_API_KEY=776bd4e0680a27079ab151d0da7cc920d1c06994
+```
+
+**Run the agent** from a Mac terminal with the job details gathered in Steps 1–4:
+```bash
+cd /Users/joelchristabreu/Documents/projects/agents
+
+python3 src/job_agent.py \
+  --url "<JOB_URL>" \
+  --title "<JOB_TITLE>" \
+  --company "<COMPANY>" \
+  --location "<LOCATION>" \
+  --text "<RAW_SUMMARY_TEXT>"
+```
+
+The script will:
+1. Refine the summary via Claude CLI (skippable by omitting `--text` if you want it to fetch and parse the URL itself)
+2. Look up contacts via Hunter.io (uses `HUNTER_API_KEY` from env)
+3. Detect duplicates by URL (column D) and update rather than re-add if found
+4. Write to the correct columns: A=Company, B=Job Title, C=Job Summary, D=Link, E=Date Added, F=Contacts, G=Notes
+5. Print the row reference on success
+
+**To bypass the Claude CLI refinement** and pass pre-written summary/notes directly, use `run_job_entry.py` instead — it has all fields pre-populated and is intended for one-off manual runs.
+
+### How to execute a command in Terminal from dispatch
+
+`mcp__workspace__bash` is a Linux sandbox and cannot run Mac-native Python or reach the credentials file at `/Users/joelchristabreu/Desktop/`. Use the **clipboard → Terminal** method instead:
+
+1. **Request computer-use access** (first time only per session):
+   ```
+   mcp__computer-use__request_access(
+     apps=["Terminal"],
+     reason="Run job tracker script",
+     clipboardWrite=true
+   )
+   ```
+
+2. **Write the command to the clipboard** (include a trailing newline so Terminal auto-executes on paste):
+   ```
+   mcp__computer-use__write_clipboard(text="cd /Users/joelchristabreu/Documents/projects/agents && python3 src/job_agent.py --url \"<URL>\" --title \"<TITLE>\" --company \"<COMPANY>\" --location \"<LOCATION>\"\n")
+   ```
+
+3. **Open Terminal**:
+   ```
+   mcp__computer-use__open_application(app="Terminal")
+   ```
+
+4. **Paste via the Edit menu** (left-click only — no keyboard shortcuts):
+   - Take a screenshot to locate the menu bar.
+   - Left-click **Edit** in the macOS menu bar.
+   - Left-click **Paste** in the dropdown.
+   - The command pastes and executes automatically (trailing `\n` acts as Return).
+
+5. **Wait and screenshot** to verify output. Look for "Row written: N" or any error messages.
+
+> **Tip**: For `run_job_entry.py` (pre-populated one-off entries), the command is simply:
+> `cd /Users/joelchristabreu/Documents/projects/agents && python3 run_job_entry.py\n`
+
+---
+
+## Step 5B — Open the Google Sheet and check for duplicates / find next empty row (Chrome fallback)
+
+Use the Chrome extension to open the sheet and read its current contents.
+
+### 5a — Navigate to the sheet
+```
+mcp__Claude_in_Chrome__navigate(url: "https://docs.google.com/spreadsheets/d/1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q/edit#gid=0")
+```
+Wait ~3 seconds for the sheet to fully load, then take a screenshot to confirm it rendered (look for column headers like "Company", "Job Title").
+
+### 5b — Find the last data row and check for duplicates
+
+Google Sheets uses canvas rendering — DOM scraping with `.waffle tbody tr` will return nothing. Use the **Name Box navigation approach** instead:
+
+1. **Click a cell in the grid** to focus it (e.g. click cell A2 visually).
+2. **Jump in large increments** using the Name Box (top-left cell address box): click it, type `A50`, press Enter. Take a screenshot to see which rows have data.
+3. **Binary-search downward** (try A80, A60, etc.) until you find the first empty row. The last row with data in column A is row N−1; the next empty row is row N.
+4. **Check for duplicates**: scroll through the Link column (column D) visually in screenshots, or use the Name Box to jump to `D2` and scan downward. Look for the job URL. If found, note the row and set `mode = "update"`. If not found, set `mode = "add"`.
+
+> **Tip**: Taking a screenshot after each Name Box jump gives you row numbers on the left margin and cell content — use these to orient yourself.
+
+---
+
+## Step 6B — Write to the sheet via the Chrome extension (fallback)
+
+Use the **Name Box navigation** method to write to each cell. Google Sheets' canvas rendering means DOM-based cell selectors (`.waffle`, `gridcell`, etc.) do not work reliably.
+
+### How to write a single-line cell
+
+1. Click the Name Box (top-left cell address input).
+2. Type the cell address (e.g. `A56`) and press Enter — this selects the cell.
+3. Type the value directly. Google Sheets auto-enters edit mode when you start typing.
+4. **To avoid autocomplete inserting wrong text**: after typing, press the `Delete` key once to dismiss any autocomplete suggestion, then press `Tab` or `Enter` to commit.
+
+### How to write multi-line cells (C = Job Summary, F = Contacts, G = Notes)
+
+> ⚠️ **Critical**: Do NOT paste multi-line text (from clipboard) into a cell that is merely *selected* (not in edit mode). Google Sheets treats newlines in pasted content as row separators, spreading text across multiple rows. This corrupts the sheet.
+
+The only reliable method for multi-line content via the Chrome extension is **type line-by-line**:
+
+1. Navigate to the cell via the Name Box (e.g. `C56` → Enter).
+2. Begin typing — Google Sheets enters edit mode automatically.
+3. For each line break within the cell, press **`ctrl+Return`** (this inserts a newline inside the cell without committing it).
+4. Type the next line. Repeat for each line.
+5. When done, press **`Tab`** to commit and move to the next column (or `Enter` to move down).
+
+Example sequence for a 3-line value:
+```
+[Name Box] → type "C56" → Enter
+[type] "Line one content"
+[key]  ctrl+Return
+[type] "Line two content"
+[key]  ctrl+Return
+[type] "Line three content"
+[key]  Tab   ← commits the cell
+```
+
+### 6a — Add mode (new row)
+
+Write to row N (first empty row found in Step 5). Write each column in order:
+
+| Column | Field | Notes |
+|--------|-------|-------|
+| A | Company | Short name or "(Stealth)" if undisclosed |
+| B | Job Title | Single line |
+| C | Job Summary | Multi-line — use ctrl+Return for line breaks |
+| D | Link | Job URL — single line |
+| E | Date Added | Today's date (YYYY-MM-DD) — single line |
+| F | Contacts | Multi-line — one contact per line using ctrl+Return |
+| G | Notes | Multi-line — company research block using ctrl+Return |
+
+Write each cell one at a time using the Name Box navigation + type approach above.
+
+### 6b — Update mode (duplicate URL found)
+
+Write only columns A, B, C, F, and G at the existing row N. **Do not touch columns D (Link), E (Date Added), or I (Date Applied).**
+
+| Column | Field |
+|--------|-------|
+| A | Company |
+| B | Job Title |
+| C | Job Summary |
+| F | Contacts |
+| G | Notes |
+
+> **If a cell value looks wrong after committing** (e.g. autocomplete added extra text): navigate back to that cell via the Name Box, retype the correct value, press `Delete` to dismiss autocomplete, then `Tab` to commit. Verify with a screenshot.
+
+---
+
+## Step 7 — Report result
+
+State:
+- Job title and company
+- Whether it was **newly added** or **updated** (duplicate URL)
+- Row it was written to (if available)
+- Any cells that could not be written (and why)
