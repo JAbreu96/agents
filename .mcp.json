@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "gmail_personal": {
+      "command": "npx",
+      "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"]
+    },
     "gsheets": {
       "command": "npx",
       "args": ["-y", "mcp-gsheets@latest"],

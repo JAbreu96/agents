@@ -9,7 +9,7 @@ Track the job posting at `$ARGUMENTS` by following these steps:
 ## Spreadsheet info
 - Spreadsheet ID: `1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q`
 - Worksheet: `Sheet1`
-- Column layout (1-based): A=Job Title, B=Summary, C=Link, D=Date Added, E=Contacts, F=Notes, G=Date Applied
+- Column layout (1-based): A=Company, B=Job Title, C=Summary, D=Link, E=Date Added, F=Contacts, G=Notes, H=Outreach Date
 
 ---
 
@@ -100,10 +100,10 @@ One per line. If no contacts are found, leave this field blank.
 
 ## Step 5 — Check for duplicates and find next empty row
 
-Use the `gsheets` MCP tool to read the full sheet (`Sheet1!A:G`) to:
+Use the `gsheets` MCP tool to read the full sheet (`Sheet1!A:H`) to:
 
-1. **Check for duplicates** — scan column C for the job URL.
-   - **If found at row N**: update columns A–C and E–F at that row. **Never touch column D (Date Added) or G (Date Applied).** Report that the job was updated, not added. Stop here.
+1. **Check for duplicates** — scan column D for the job URL.
+   - **If found at row N**: update columns A–D and F–G at that row. **Never touch column E (Date Added) or H (Outreach Date).** Report that the job was updated, not added. Stop here.
 
 2. **Find the next empty row** — scan column A from row 2 downward and find the first row where column A is empty. Call this row N.
 
@@ -113,11 +113,11 @@ Use the `gsheets` MCP tool to read the full sheet (`Sheet1!A:G`) to:
 
 Use `sheets_update_values` to write to row N (the first empty row found in Step 5):
 
-| A | B | C | D | E | F | G |
-|---|---|---|---|---|---|---|
-| Job Title | Summary | Link | Today's date (YYYY-MM-DD) | Contacts | Notes | _(leave blank)_ |
+| A | B | C | D | E | F | G | H |
+|---|---|---|---|---|---|---|---|
+| Company | Job Title | Summary | Link | Today's date (YYYY-MM-DD) | Contacts | Notes | _(leave blank)_ |
 
-Use range `Sheet1!A{N}:G{N}`.
+Use range `Sheet1!A{N}:H{N}`.
 
 **If no empty row exists within the current range** (the sheet is full): use `sheets_append_values` with `insertDataOption: INSERT_ROWS` to add a new row beyond the current range.
 
