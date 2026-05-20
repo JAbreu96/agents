@@ -1,8 +1,11 @@
+import logging
 import os
 from datetime import date, datetime, timedelta
 
 import gspread
 from google.oauth2 import service_account
+
+logger = logging.getLogger(__name__)
 
 SPREADSHEET_ID = "1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q"
 WORKSHEET = "Sheet1"
@@ -26,19 +29,24 @@ COL_DATE_APPLIED = 8
 COL_STATUS = 9
 
 
-def _credentials():
-    path = SERVICE_ACCOUNT_FILE or os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
-    return service_account.Credentials.from_service_account_file(path, scopes=SCOPES)
+_client: gspread.Client | None = None
+
+
+def _get_client() -> gspread.Client:
+    global _client
+    if _client is None:
+        path = SERVICE_ACCOUNT_FILE or os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+        creds = service_account.Credentials.from_service_account_file(path, scopes=SCOPES)
+        _client = gspread.authorize(creds)
+    return _client
 
 
 def get_sheet() -> gspread.Worksheet:
-    gc = gspread.authorize(_credentials())
-    return gc.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET)
+    return _get_client().open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET)
 
 
 def get_archive_sheet() -> gspread.Worksheet:
-    gc = gspread.authorize(_credentials())
-    return gc.open_by_key(SPREADSHEET_ID).worksheet(ARCHIVE_WORKSHEET)
+    return _get_client().open_by_key(SPREADSHEET_ID).worksheet(ARCHIVE_WORKSHEET)
 
 
 def _parse_date(value: str) -> date | None:
@@ -49,6 +57,7 @@ def _parse_date(value: str) -> date | None:
             return datetime.strptime(value.strip(), fmt).date()
         except ValueError:
             continue
+    logger.warning("Unrecognized date format %r — row will be excluded from date filters", value.strip())
     return None
 
 
@@ -66,6 +75,8 @@ def _row_to_dict(row: list, row_index: int) -> dict:
         "contacts": cell(COL_CONTACTS),
         "notes": cell(COL_NOTES),
         "outreach_date": cell(COL_OUTREACH),
+        "date_applied": cell(COL_DATE_APPLIED),
+        "status": cell(COL_STATUS),
     }
 
 
@@ -80,14 +91,73 @@ def read_all_rows() -> list[dict]:
     return rows
 
 
-def mark_outreached(row_index: int, date_str: str) -> None:
-    sheet = get_sheet()
-    sheet.update_cell(row_index, COL_OUTREACH + 1, date_str)  # gspread uses 1-based cols
+def add_job(
+    company: str,
+    title: str,
+    link: str,
+    summary: str = "",
+    contacts: str = "",
+    notes: str = "",
+    status: str = "Tracking",
+    date_added: str = "",
+) -> dict:
+    """Append a new job row to Sheet1. Returns the inserted row dict."""
+    ws = get_sheet()
+    date_str = date_added.strip() if date_added.strip() else str(date.today())
+    row = [""] * 10
+    row[COL_COMPANY] = company.strip()
+    row[COL_TITLE] = title.strip()
+    row[COL_SUMMARY] = summary.strip()
+    row[COL_LINK] = link.strip()
+    row[COL_DATE_ADDED] = date_str
+    row[COL_CONTACTS] = contacts.strip()
+    row[COL_NOTES] = notes.strip()
+    row[COL_OUTREACH] = ""
+    row[COL_DATE_APPLIED] = ""
+    row[COL_STATUS] = status.strip()
+    ws.append_row(row, value_input_option="USER_ENTERED")
+    new_row_index = len(ws.get_all_values())
+    return _row_to_dict(row, new_row_index)
 
 
-def update_status(row_index: int, status: str) -> None:
-    sheet = get_sheet()
-    sheet.update_cell(row_index, COL_STATUS + 1, status)
+def _find_live_row_index(ws: gspread.Worksheet, company: str, hint: int) -> int:
+    """Return the current row index for a company, re-reading the sheet to avoid stale indices.
+    Checks the hinted row first; falls back to a full scan."""
+    all_values = ws.get_all_values()
+    needle = company.strip().lower()
+    # Fast path: hint is still correct
+    if 1 <= hint - 1 < len(all_values):
+        if all_values[hint - 1] and all_values[hint - 1][COL_COMPANY].strip().lower() == needle:
+            return hint
+    # Slow path: scan for the company
+    for i, row in enumerate(all_values[1:], start=2):
+        if row and row[COL_COMPANY].strip().lower() == needle:
+            return i
+    raise ValueError(f"Company '{company}' no longer found in sheet — it may have been deleted or archived.")
+
+
+def mark_outreached(company: str, hint_row: int, date_str: str) -> None:
+    ws = get_sheet()
+    row_index = _find_live_row_index(ws, company, hint_row)
+    ws.update_cell(row_index, COL_OUTREACH + 1, date_str)
+
+
+def update_status(company: str, hint_row: int, status: str) -> None:
+    ws = get_sheet()
+    row_index = _find_live_row_index(ws, company, hint_row)
+    ws.update_cell(row_index, COL_STATUS + 1, status)
+
+
+def update_notes(company: str, hint_row: int, notes: str) -> None:
+    ws = get_sheet()
+    row_index = _find_live_row_index(ws, company, hint_row)
+    ws.update_cell(row_index, COL_NOTES + 1, notes)
+
+
+def update_contacts(company: str, hint_row: int, contacts: str) -> None:
+    ws = get_sheet()
+    row_index = _find_live_row_index(ws, company, hint_row)
+    ws.update_cell(row_index, COL_CONTACTS + 1, contacts)
 
 
 def archive_old_jobs(days: int = 60) -> list[dict]:
@@ -111,8 +181,20 @@ def archive_old_jobs(days: int = 60) -> list[dict]:
 
     if rows_to_archive:
         archive_ws.append_rows(rows_to_archive, value_input_option="USER_ENTERED")
-        # Delete in reverse order so indices stay valid
-        for row_idx in sorted(row_indices_to_delete, reverse=True):
-            ws.delete_rows(row_idx)
+        # Batch delete in reverse order so earlier deletions don't shift later indices
+        requests = [
+            {
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": ws.id,
+                        "dimension": "ROWS",
+                        "startIndex": row_idx - 1,  # Sheets API is 0-based
+                        "endIndex": row_idx,
+                    }
+                }
+            }
+            for row_idx in sorted(row_indices_to_delete, reverse=True)
+        ]
+        ws.spreadsheet.batch_update({"requests": requests})
 
     return [_row_to_dict(r, 0) for r in rows_to_archive]

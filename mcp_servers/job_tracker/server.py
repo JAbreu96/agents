@@ -14,6 +14,8 @@ def _compact(row: dict) -> dict:
         "title": row["title"],
         "link": row["link"],
         "date_added": row["date_added"],
+        "date_applied": row["date_applied"],
+        "status": row["status"],
         "outreach_date": row["outreach_date"],
     }
 
@@ -114,7 +116,7 @@ def mark_outreached(company: str, outreach_date: str = "") -> dict:
 
     row = matches[0]
     date_str = outreach_date.strip() if outreach_date.strip() else str(date.today())
-    sheet.mark_outreached(row["row_index"], date_str)
+    sheet.mark_outreached(row["company"], row["row_index"], date_str)
 
     return {
         "success": True,
@@ -125,6 +127,40 @@ def mark_outreached(company: str, outreach_date: str = "") -> dict:
 
 
 VALID_STATUSES = {"Tracking", "Applied", "Phone Screen", "Technical", "System Design", "Behavioral", "Offer", "Rejected"}
+
+
+@mcp.tool()
+def add_job(
+    company: str,
+    title: str,
+    link: str,
+    summary: str = "",
+    contacts: str = "",
+    notes: str = "",
+    status: str = "Tracking",
+    date_added: str = "",
+) -> dict:
+    """
+    Add a new job to the tracker. Appends a row to Sheet1 with the correct column layout.
+    - company, title, link: required
+    - summary, contacts, notes: optional free-text fields
+    - status: defaults to 'Tracking'; must be one of the valid status values
+    - date_added: YYYY-MM-DD; defaults to today
+    """
+    if status not in VALID_STATUSES:
+        raise ValueError(f"Invalid status '{status}'. Must be one of: {', '.join(sorted(VALID_STATUSES))}")
+
+    row = sheet.add_job(
+        company=company,
+        title=title,
+        link=link,
+        summary=summary,
+        contacts=contacts,
+        notes=notes,
+        status=status,
+        date_added=date_added,
+    )
+    return {"success": True, **_compact(row)}
 
 
 @mcp.tool()
@@ -148,9 +184,94 @@ def update_job_status(company: str, status: str) -> dict:
         raise ValueError(f"Ambiguous match — {len(matches)} companies found: {names}. Be more specific.")
 
     row = matches[0]
-    sheet.update_status(row["row_index"], status)
+    sheet.update_status(row["company"], row["row_index"], status)
 
     return {"success": True, "company": row["company"], "row": row["row_index"], "status": status}
+
+
+@mcp.tool()
+def update_notes(company: str, notes: str) -> dict:
+    """
+    Overwrite the Notes field for a job.
+    - company: case-insensitive match
+    - notes: new notes content (replaces existing value)
+    """
+    rows = sheet.read_all_rows()
+    matches = _match_company(rows, company)
+
+    if not matches:
+        raise ValueError(f"No job found matching company: '{company}'")
+    if len(matches) > 1:
+        names = ", ".join(r["company"] for r in matches)
+        raise ValueError(f"Ambiguous match — {len(matches)} companies found: {names}. Be more specific.")
+
+    row = matches[0]
+    sheet.update_notes(row["company"], row["row_index"], notes)
+    return {"success": True, "company": row["company"], "row": row["row_index"], "notes": notes}
+
+
+@mcp.tool()
+def update_contacts(company: str, contacts: str) -> dict:
+    """
+    Overwrite the Contacts field for a job.
+    - company: case-insensitive match
+    - contacts: new contacts content (replaces existing value)
+    """
+    rows = sheet.read_all_rows()
+    matches = _match_company(rows, company)
+
+    if not matches:
+        raise ValueError(f"No job found matching company: '{company}'")
+    if len(matches) > 1:
+        names = ", ".join(r["company"] for r in matches)
+        raise ValueError(f"Ambiguous match — {len(matches)} companies found: {names}. Be more specific.")
+
+    row = matches[0]
+    sheet.update_contacts(row["company"], row["row_index"], contacts)
+    return {"success": True, "company": row["company"], "row": row["row_index"], "contacts": contacts}
+
+
+@mcp.tool()
+def get_stats() -> dict:
+    """
+    Return a summary of the job tracker: total jobs, counts per status, and outreach coverage.
+    Useful for digests and dashboards without pulling every row.
+    """
+    rows = sheet.read_all_rows()
+    status_counts: dict[str, int] = {}
+    for r in rows:
+        s = r["status"] or "Unknown"
+        status_counts[s] = status_counts.get(s, 0) + 1
+
+    outreached = sum(1 for r in rows if r["outreach_date"])
+    return {
+        "total": len(rows),
+        "by_status": status_counts,
+        "outreached": outreached,
+        "not_outreached": len(rows) - outreached,
+    }
+
+
+@mcp.tool()
+def list_jobs_needing_followup(days: int = 7) -> list[dict]:
+    """
+    Return jobs that are stale and may need a follow-up nudge. A job qualifies if status
+    is still 'Applied' AND either:
+    - date_applied is set and more than `days` days ago, OR
+    - outreach_date is set and more than `days` days ago (and no date_applied yet)
+    Sorted oldest activity first. Default threshold: 7 days.
+    """
+    rows = sheet.read_all_rows()
+    cutoff = date.today() - timedelta(days=days)
+    stale = []
+    for r in rows:
+        if r["status"] != "Applied":
+            continue
+        anchor = sheet._parse_date(r["date_applied"]) or sheet._parse_date(r["outreach_date"])
+        if anchor and anchor <= cutoff:
+            stale.append((anchor, r))
+    stale.sort(key=lambda x: x[0])
+    return [_compact(r) for _, r in stale]
 
 
 @mcp.tool()
