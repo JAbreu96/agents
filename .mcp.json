@@ -1,5 +1,14 @@
 {
   "mcpServers": {
+    "job_tracker": {
+      "command": "/Users/joelchristabreu/.pyenv/shims/python3",
+      "args": [
+        "/Users/joelchristabreu/Documents/projects/agents/mcp_servers/job_tracker/server.py"
+      ],
+      "env": {
+        "GOOGLE_APPLICATION_CREDENTIALS": "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+      }
+    },
     "gmail_personal": {
       "command": "npx",
       "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"]

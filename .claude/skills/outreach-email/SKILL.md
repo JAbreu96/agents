@@ -17,7 +17,7 @@ Parse the arguments:
 
 **Name:** Joelchrist Abreu  
 **Email:** joelchristabreu4044@gmail.com  
-**Current/recent role:** Software Engineer at Meta (NYC), Apr 2025 – Apr 2026
+**Current/recent role:** Software Engineer at Meta (NYC), Apr 2025 – Apr 2026 (recently wrapped up)
 
 **Meta highlights (lead with these):**
 - Shipped a full-stack GraphQL API + React widget for on-demand data exports on Meta's Rights Management platform — drove 5,969 report downloads across 393 accounts and 16 report types
@@ -43,11 +43,11 @@ Write the email in three sections. Keep the total length to ~150 words — punch
 - Warm but professional — not sycophantic.
 
 ### Experience
-- 2–3 sentences max. **Always lead with Meta.**
-- Pick the 1–2 Meta highlights most relevant to the company or role. For example:
-  - For an AI/ML-focused company: lead with the AI agent tool.
-  - For a product/platform company: lead with the GraphQL API + data export work and dashboard adoption metrics.
-  - If the role or company domain is unclear, default to the GraphQL/data export work (has the strongest concrete numbers).
+- 2–3 sentences max. **Always lead with Meta.** Use past tense — "recently wrapped up a year at Meta" (not "wrapping up").
+- Pick the 1–2 Meta highlights most relevant to the company or role. **Default to leading with the AI agent tool** unless the role is clearly non-AI (e.g., pure frontend, media/content platform). For example:
+  - For AI/ML, automation, or data-heavy companies: lead with the AI agent tool (integrated across five production AI agents).
+  - For pure product/platform or frontend-focused roles with no AI angle: lead with the GraphQL API + data export work and dashboard adoption metrics.
+  - When in doubt, lead with AI — it's the most differentiating work.
 - End with a brief mention of the stack (React, TypeScript, GraphQL) if it seems relevant.
 
 ### Outro
@@ -55,6 +55,13 @@ Write the email in three sections. Keep the total length to ~150 words — punch
 - Make the ask clear and low-friction: ask if they'd be open to a quick chat or if they'd be willing to refer you internally.
 - If a job_url was provided, include it as a plain line at the end of the email: `Job posting: <url>`
 - Close politely — no pressure, just genuine interest.
+- Always end with this exact signature block:
+  ```
+  Thanks,
+  Joelchrist Abreu
+  joelchristabreu4044@gmail.com
+  linkedin.com/in/jc-abreu
+  ```
 
 **Subject line:** Keep it short and specific. Do NOT use "Referral interest —" as a prefix. Use something like "Quick intro — Software Engineer from Meta" or "[Role] at [Company] — Software Engineer from Meta".
 

@@ -51,6 +51,27 @@ For each email found, determine:
 
 ---
 
+## Step 3b — Update the job tracker status
+
+For each email that matched a tracked company, call `mcp__job_tracker__update_job_status` to write the status back to the sheet.
+
+Map email category → Status value:
+| Email Category | Status |
+|---|---|
+| `Interview Invite` | `Phone Screen` (if first interview) or `Technical` / `Behavioral` based on context |
+| `Offer` | `Offer` |
+| `Rejection` | `Rejected` |
+| `Application Received` | `Applied` |
+| `Follow-up Needed` | leave status unchanged |
+| `Recruiter Outreach` | leave status unchanged |
+| `Other Update` | leave status unchanged |
+
+Only update if the new status represents a **forward progression** — do not downgrade (e.g., don't set `Applied` if status is already `Phone Screen`).
+
+Skip companies labeled `Unknown / New` — no tracker row to update.
+
+---
+
 ## Step 4 — Compose the digest
 
 Write a clean digest email. Format:
@@ -101,5 +122,6 @@ Use `mcp__gmail_personal__send_email` with:
 Report back:
 - How many emails were found and categorized
 - How many matched tracked companies
+- Which jobs had their status updated in the sheet (company → new status)
 - Whether the digest was sent successfully
 - Any action items surfaced
