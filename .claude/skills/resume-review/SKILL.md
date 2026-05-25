@@ -6,30 +6,45 @@ argument-hint: "[job_url or company_name (optional)]"
 
 Analyze Joelchrist's resume against a job description using the arguments: `$ARGUMENTS`
 
-## Resume
+## Base Resume (Google Doc)
 
-Joelchrist Abreu — Software Engineer
-joelchristabreu4044@gmail.com | linkedin.com/in/jc-abreu
+- **Google Doc ID:** `1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk`
+- **Google Drive Resumes Folder ID:** `10QqchL7fb18Hw3Gd5KLBHct96ijIb3rR`
+- **Service Account:** `/Users/joelchristabreu/Documents/agents-491602-service-account.json`
+- **Link:** https://docs.google.com/document/d/1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk/edit
 
-**Experience**
+**Read the live resume at the start using the Docs API:**
 
-Meta — Software Engineer (NYC) | Apr 2025 – Apr 2026
-- Shipped a full-stack GraphQL API + React widget for on-demand data exports on Meta's Rights Management platform — drove 5,969 report downloads across 393 accounts and 16 report types
-- Built an internal AI agent tool that auto-traverses the Asset Data Model graph and returns LLM-friendly structured summaries across copyrights, conflicts, and misuses — integrated across five production AI agents
-- Built an interactive asset-relationship graph visualization tool to replace manual ID lookups, improving debuggability for ops and engineers
-- Developed a multi-category dashboard component adopted by 545 accounts; resolved production out-of-memory issues via backend query optimization
-- Drove cross-functional work via 10+ design docs, stakeholder alignment, and structured feedback loops
-- Stack: React, TypeScript, GraphQL, Hack (PHP), Node.js
+```python
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
 
-Razortooth Communications — Software Engineer | Apr 2023 – Apr 2024
-- Developed BLE firmware and mobile QA tooling
-- Improved Bluetooth connectivity reliability across iOS and Android
+DOC_ID = "1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk"
+SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
 
-Strategio — Software Engineer | Apr 2022 – Jul 2022
-- Automated AWS EC2 provisioning workflows; worked with Docker and CI/CD pipelines
+creds = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE,
+    scopes=["https://www.googleapis.com/auth/documents.readonly"]
+)
+docs = build("docs", "v1", credentials=creds)
+doc = docs.documents().get(documentId=DOC_ID).execute()
 
-**Education**
-BS Computer Science
+# Extract plain text from all paragraph elements
+lines = []
+for el in doc.get("body", {}).get("content", []):
+    if "paragraph" in el:
+        text = "".join(
+            r.get("textRun", {}).get("content", "")
+            for r in el["paragraph"].get("elements", [])
+        ).strip()
+        if text:
+            lines.append(text)
+
+resume_text = "\n".join(lines)
+print(resume_text)
+```
+
+Use the output of this script as the resume content for the analysis. If the script fails, fall back to the `mcp__claude_ai_Google_Drive__read_file_content` tool with fileId `1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk`.
 
 ---
 
@@ -86,7 +101,7 @@ Now act as both:
 Using the rewritten experience section from Step 3:
 
 **Sections That Would Get Skipped**
-List any bullets or sections that are weak, vague, or would get skimmed past — and why.
+List any bullets or section that are weak, vague, or would get skimmed past — and why.
 
 **Rewrites to Stop the Scroll**
 For each flagged section, provide a sharper version that earns attention. Lead with impact, be specific, cut filler.
@@ -98,3 +113,69 @@ For each flagged section, provide a sharper version that earns attention. Lead w
 Wrap up with:
 - Revised match score after the rewrites (X/100)
 - 2–3 sentences on the strongest angle to emphasize when applying to this specific role
+
+---
+
+## Step 6 — Create a tailored resume copy in Google Drive
+
+1. **Extract the company name** from the job description (e.g. "Zoox", "Sesame", "Microsoft").
+
+2. **Copy the base Google Doc** using `mcp__claude_ai_Google_Drive__copy_file`:
+   - `fileId`: `1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk`
+   - `parentId`: `10QqchL7fb18Hw3Gd5KLBHct96ijIb3rR`
+   - `title`: `Joelchrist Abreu — Resume — {Company}`
+   - Save the returned file ID as `COPY_DOC_ID`
+
+3. **Apply the rewritten bullets to the copy** using the Docs API. For each bullet that changed between the original and the rewrite, issue a `replaceAllText` request:
+
+```python
+import warnings
+warnings.filterwarnings("ignore")
+
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+
+COPY_DOC_ID = "{COPY_DOC_ID}"  # from step 2
+SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+
+creds = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE,
+    scopes=["https://www.googleapis.com/auth/documents"]
+)
+docs = build("docs", "v1", credentials=creds)
+
+# List of (original_text, rewritten_text) pairs — only bullets that changed
+replacements = [
+    ("ORIGINAL BULLET TEXT", "REWRITTEN BULLET TEXT"),
+    # ... one entry per changed bullet
+]
+
+requests = [
+    {
+        "replaceAllText": {
+            "containsText": {"text": old, "matchCase": True},
+            "replaceText": new
+        }
+    }
+    for old, new in replacements
+]
+
+result = docs.documents().batchUpdate(
+    documentId=COPY_DOC_ID,
+    body={"requests": requests}
+).execute()
+
+for reply, (old, _) in zip(result.get("replies", []), replacements):
+    count = reply.get("replaceAllText", {}).get("occurrencesChanged", 0)
+    status = "✅" if count > 0 else "⚠️  0 matches"
+    print(f"{status} {old[:60]}...")
+```
+
+   **Important:** Only replace bullets that genuinely changed. Do not replace bullets that stayed the same — this preserves all original formatting, fonts, and styling in the copy.
+
+   Share the service account with the new doc if needed — it inherits permissions from the copied doc automatically since it already has access to the base.
+
+4. **Report the result:**
+
+   > 📄 **[Joelchrist Abreu — Resume — {Company}]({viewUrl})**
+   > All rewritten bullets have been applied directly to the doc. Open it to review and make any final tweaks.
