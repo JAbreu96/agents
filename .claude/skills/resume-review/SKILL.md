@@ -81,14 +81,19 @@ Be blunt. What would make a recruiter pause or skip this resume for this specifi
 ## Step 3 — Rewrite the experience section
 
 Rewrite Joelchrist's experience section to:
-- Naturally incorporate the missing keywords from Step 2 where they genuinely apply — don't force keywords that don't fit
-- Address the red flags identified in Step 2
 - Apply the **Google XYZ formula** to every bullet: _Accomplished X as measured by Y by doing Z_
-- Keep all existing metrics (5,969 downloads, 393 accounts, 545 accounts, 5 production agents, etc.)
+- Naturally incorporate the missing keywords from Step 2 **only where they genuinely apply** — if a keyword can't be tied to real work in the base resume, flag it as a gap instead of forcing it
+- Address the red flags identified in Step 2 through honest reframing, not fabrication
 - Maintain the same company names, titles, and date ranges
-- Do not invent experience or fabricate metrics
 
-Return the full rewritten experience section, formatted cleanly.
+**Strict accuracy rules — no exceptions:**
+- **Never invent metrics.** Every number (%, count, time saved) must come directly from the base resume. Do not estimate, round up, or add new figures.
+- **Never invent responsibilities.** Only reframe what actually happened. If the base resume says "built a dashboard," you may call it a "real-time monitoring dashboard" if that's accurate — but you cannot add "built an anomaly detection pipeline" if it isn't there.
+- **Never add technologies not in the base resume.** If the JD wants Snowflake/dbt and those aren't in the resume, note the gap in Step 2 — do not insert them into bullets.
+- **Reframing is allowed; fabrication is not.** You may recontextualize work using industry vocabulary (e.g. "data export" → "policy enforcement reporting") as long as the underlying activity is the same. If the reframe materially misrepresents what was built, don't use it.
+- When in doubt, keep the original phrasing and focus rewriting energy on structure and impact clarity.
+
+Return the full rewritten experience section, formatted cleanly. For any missing keyword that could not be honestly incorporated, add a note at the bottom: `⚠️ Could not add: [keyword] — not present in base resume.`
 
 ---
 
