@@ -119,13 +119,24 @@ Wrap up with:
 ## Step 6 — Create a tailored resume copy in Google Drive
 
 ### 1-page rule
-The final resume **must fit on one page**. Target **≤ 400 words** of body content (excluding header and section labels). If the rewrite exceeds this:
-- Cap Meta at **5 bullets max** — keep the highest-impact ones for this specific role
-- Cap Razortooth at **2 bullets max**
-- Cap Strategio at **1–2 bullets max**
-- Trim any bullet over 40 words — cut filler, preserve the metric
+The final resume **must fit on one page — use as much of that page as possible**. Target **380–450 words** of body content (excluding header and section labels). Every experience section must have **at least 3 bullets**.
 
-After applying rewrites and before reporting the result, verify word count by reading the doc back and counting. If still over 400 words, delete the lowest-impact bullets using `deleteContentRange` (always delete from highest index to lowest to avoid index shifting).
+**Bullet targets per section:**
+- Meta: 5 bullets (trim to 4 only if still over limit after tightening wording)
+- Razortooth: 3 bullets
+- Strategio: 3 bullets
+
+**If over 450 words:**
+- First trim any bullet over 40 words — cut filler, preserve the metric
+- Then remove the lowest-impact bullet from Meta only (never drop below 3 bullets per section)
+- Use `deleteContentRange` — always delete from **highest index to lowest** to avoid index shifting
+
+**If under 380 words:**
+- Add back a previously trimmed bullet, prioritizing the most role-relevant one
+- Use `insertText` to insert at the right position, then `createParagraphBullets` to apply list formatting
+- Process insertions from **highest index to lowest** in the batchUpdate so earlier inserts don't shift subsequent positions
+
+After applying all changes, verify word count by re-reading the doc. Report the final word count alongside the result link.
 
 ---
 
