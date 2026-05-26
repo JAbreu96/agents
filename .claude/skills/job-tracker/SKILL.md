@@ -98,7 +98,61 @@ One per line. If no contacts are found, leave this field blank.
 
 ---
 
-## Step 5 — Check for duplicates and find next empty row
+## Step 5 — Resume match score
+
+Read the base resume from the Google Docs API, then score it against this job description.
+
+```python
+import warnings
+warnings.filterwarnings("ignore")
+
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+
+DOC_ID = "1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk"
+SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+
+creds = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE,
+    scopes=["https://www.googleapis.com/auth/documents.readonly"]
+)
+docs = build("docs", "v1", credentials=creds)
+doc = docs.documents().get(documentId=DOC_ID).execute()
+
+lines = []
+for el in doc.get("body", {}).get("content", []):
+    if "paragraph" in el:
+        text = "".join(
+            r.get("textRun", {}).get("content", "")
+            for r in el["paragraph"].get("elements", [])
+        ).strip()
+        if text:
+            lines.append(text)
+
+resume_text = "\n".join(lines)
+print(resume_text)
+```
+
+If the script fails, fall back to `mcp__claude_ai_Google_Drive__read_file_content` with fileId `1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk`.
+
+Using the resume text and the job description from Step 2, produce a **lightweight match assessment**:
+
+- **Match Score: X/100** — one sentence rationale
+- **Top 3 Gaps** — the 3 most important missing keywords or skills
+
+Format this as a 3-line block that will be prepended to the Notes column:
+```
+Match Score: X/100 — [one-sentence rationale]
+Gaps: [gap1], [gap2], [gap3]
+
+```
+(Leave a blank line after the gaps so the research notes from Step 3 are visually separated.)
+
+Save this as `MATCH_BLOCK` — it will be written to column G in Step 8.
+
+---
+
+## Step 6 — Check for duplicates and find next empty row
 
 Use the `gsheets` MCP tool to read the full sheet (`Sheet1!A:H`) to:
 
@@ -109,13 +163,21 @@ Use the `gsheets` MCP tool to read the full sheet (`Sheet1!A:H`) to:
 
 ---
 
-## Step 6 — Write to the sheet
+## Step 7 — Write to the sheet
 
-Use `sheets_update_values` to write to row N (the first empty row found in Step 5):
+Use `sheets_update_values` to write to row N (the first empty row found in Step 6):
 
 | A | B | C | D | E | F | G | H |
 |---|---|---|---|---|---|---|---|
 | Company | Job Title | Summary | Link | Today's date (YYYY-MM-DD) | Contacts | Notes | _(leave blank)_ |
+
+For column G (Notes), combine `MATCH_BLOCK` with the research notes from Step 3:
+```
+Match Score: X/100 — [rationale]
+Gaps: [gap1], [gap2], [gap3]
+
+[Research notes from Step 3]
+```
 
 Use range `Sheet1!A{N}:H{N}`.
 
@@ -123,7 +185,7 @@ Use range `Sheet1!A{N}:H{N}`.
 
 ---
 
-## Step 7 — Set row height
+## Step 8 — Set row height
 
 After writing, cap the new row's height to 21px using the Google Sheets API via Python/Bash:
 
@@ -135,7 +197,7 @@ import google.auth.transport.requests
 SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
 SPREADSHEET_ID = "1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q"
 SHEET_ID = 138342806  # Sheet1
-ROW_N = {N}  # replace with the actual 1-based row number written in Step 6
+ROW_N = {N}  # replace with the actual 1-based row number written in Step 7
 
 creds = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE,
@@ -161,9 +223,10 @@ urllib.request.urlopen(req)
 
 ---
 
-## Step 8 — Report result
+## Step 9 — Report result
 
 State:
 - Job title and company
 - Whether it was **newly added** or **updated** (duplicate URL)
 - Row it was written to (if available)
+- Match score and top 3 gaps from Step 5
