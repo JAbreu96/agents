@@ -150,6 +150,24 @@ Gaps: [gap1], [gap2], [gap3]
 
 Save this as `MATCH_BLOCK` — it will be written to column G in Step 8.
 
+### Threshold gate
+
+**If the match score is below 65/100**, stop here and do NOT proceed to Steps 6–9.
+
+Instead, report:
+
+> ⚠️ **Match score too low to track ({score}/100)**
+> **{Job Title} — {Company}**
+> Gaps: {gap1}, {gap2}, {gap3}
+>
+> This job fell below the 65/100 tracking threshold. Add it anyway?
+
+Wait for the user to confirm before continuing. If they confirm, proceed to Step 6. If they decline or don't respond, stop.
+
+**Exception — always flag, never auto-skip:**
+If a hard location mismatch is detected (role requires relocation to another country, or is international with no remote option), add a 🌍 flag to the report above regardless of score:
+> 🌍 **Location note:** This role is based in {city/country} — outside the US or requires relocation.
+
 ---
 
 ## Step 6 — Check for duplicates and find next empty row
