@@ -118,6 +118,17 @@ Wrap up with:
 
 ## Step 6 — Create a tailored resume copy in Google Drive
 
+### 1-page rule
+The final resume **must fit on one page**. Target **≤ 400 words** of body content (excluding header and section labels). If the rewrite exceeds this:
+- Cap Meta at **5 bullets max** — keep the highest-impact ones for this specific role
+- Cap Razortooth at **2 bullets max**
+- Cap Strategio at **1–2 bullets max**
+- Trim any bullet over 40 words — cut filler, preserve the metric
+
+After applying rewrites and before reporting the result, verify word count by reading the doc back and counting. If still over 400 words, delete the lowest-impact bullets using `deleteContentRange` (always delete from highest index to lowest to avoid index shifting).
+
+---
+
 1. **Extract the company name** from the job description (e.g. "Zoox", "Sesame", "Microsoft").
 
 2. **Copy the base Google Doc** using `mcp__claude_ai_Google_Drive__copy_file`:
