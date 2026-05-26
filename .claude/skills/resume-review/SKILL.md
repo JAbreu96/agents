@@ -197,7 +197,70 @@ for reply, (old, _) in zip(result.get("replies", []), replacements):
 
    Share the service account with the new doc if needed — it inherits permissions from the copied doc automatically since it already has access to the base.
 
-4. **Report the result:**
+4. **Fix bold formatting** — after applying rewrites, run the following to enforce tasteful bolding. Rules:
+   - **Bold**: name, section headers (`TECHNICAL SKILLS`, `WORK EXPERIENCE`, `EDUCATION`), skill category labels (`Proficient:`, `Exposure:`), company names only
+   - **Not bold**: contact line, job titles, locations, dates, bullet text, education degree/school
+   - Leave all other formatting untouched
+
+```python
+import warnings
+warnings.filterwarnings("ignore")
+
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+
+COPY_DOC_ID = "{COPY_DOC_ID}"
+SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+
+creds = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE,
+    scopes=["https://www.googleapis.com/auth/documents"]
+)
+docs = build("docs", "v1", credentials=creds)
+doc = docs.documents().get(documentId=DOC_ID).execute()
+
+requests = []
+for el in doc.get("body", {}).get("content", []):
+    if "paragraph" not in el:
+        continue
+    para = el["paragraph"]
+    for r in para.get("elements", []):
+        tr = r.get("textRun", {})
+        content = tr.get("content", "")
+        is_bold = tr.get("textStyle", {}).get("bold", False)
+        si = r.get("startIndex", 0)
+        ei = r.get("endIndex", 0)
+
+        # Remove bold from job title/location (starts with "|" in job header lines)
+        if is_bold and content.strip().startswith("|") and "Software Engineer" in content:
+            requests.append({
+                "updateTextStyle": {
+                    "range": {"startIndex": si, "endIndex": ei},
+                    "textStyle": {"bold": False},
+                    "fields": "bold"
+                }
+            })
+
+        # Remove bold from education degree/school if bolded
+        if is_bold and any(x in content for x in ["B.A.", "B.S.", "Bachelor", "Forensic", "Computer Science"]):
+            requests.append({
+                "updateTextStyle": {
+                    "range": {"startIndex": si, "endIndex": ei},
+                    "textStyle": {"bold": False},
+                    "fields": "bold"
+                }
+            })
+
+if requests:
+    docs.documents().batchUpdate(documentId=COPY_DOC_ID, body={"requests": requests}).execute()
+    print(f"✅ Bold formatting fixed ({len(requests)} changes)")
+else:
+    print("✅ Bold formatting already clean")
+```
+
+5. **Verify word count and report the result:**
+
+   Re-read the doc and count words. Then report:
 
    > 📄 **[Joelchrist Abreu — Resume — {Company}]({viewUrl})**
-   > All rewritten bullets have been applied directly to the doc. Open it to review and make any final tweaks.
+   > {word_count} words · All rewrites applied · Bold formatting cleaned up
