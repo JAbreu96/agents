@@ -140,6 +140,19 @@ The final resume **must fit on one page — use as much of that page as possible
 - Add back a previously trimmed bullet, prioritizing the most role-relevant one
 - Use `insertText` to insert at the right position, then `createParagraphBullets` to apply list formatting
 - Process insertions from **highest index to lowest** in the batchUpdate so earlier inserts don't shift subsequent positions
+- **After inserting**, always explicitly remove bold from the inserted range using `updateTextStyle` with `bold: false` — inserted text can inherit bold formatting from surrounding content:
+  ```python
+  requests_unbold = [
+      {
+          "updateTextStyle": {
+              "range": {"startIndex": insert_index, "endIndex": insert_index + len(bullet_text) + 1},
+              "textStyle": {"bold": False},
+              "fields": "bold"
+          }
+      }
+  ]
+  docs.documents().batchUpdate(documentId=COPY_DOC_ID, body={"requests": requests_unbold}).execute()
+  ```
 
 After applying all changes, verify word count by re-reading the doc. Report the final word count alongside the result link.
 

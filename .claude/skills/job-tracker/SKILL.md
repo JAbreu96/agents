@@ -248,3 +248,27 @@ State:
 - Whether it was **newly added** or **updated** (duplicate URL)
 - Row it was written to (if available)
 - Match score and top 3 gaps from Step 5
+
+---
+
+## Step 10 — Auto-create tailored resume (if good fit)
+
+If the match score from Step 5 is **65/100 or above**, automatically create a tailored resume copy by running the full resume-review skill pipeline (Steps 2–6 of the resume-review skill) using:
+- The job description already fetched in Step 1
+- The resume already read in Step 5
+- Company name extracted from Step 2
+
+Follow the resume-review skill exactly:
+1. Run recruiter analysis (match score + gaps) — you already have this from Step 5, so skip to rewrites
+2. Rewrite the experience section (XYZ formula, incorporate missing keywords honestly)
+3. ATS + hiring manager scan
+4. Final summary with revised score
+5. Create Google Drive copy:
+   - Copy base doc `1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk` into folder `10QqchL7fb18Hw3Gd5KLBHct96ijIb3rR` titled `Joelchrist Abreu — Resume — {Company}`
+   - Apply rewritten bullets via `replaceAllText`
+   - Delete excess Meta bullets (keep 5, or 4 only if over 450 words)
+   - Verify word count is 380–450; insert/delete bullets as needed
+   - **After any `insertText`, always call `updateTextStyle` with `bold: false` on the inserted range to prevent inherited bold formatting**
+   - Report the final doc link and word count
+
+If the match score is **below 65**, skip this step entirely.

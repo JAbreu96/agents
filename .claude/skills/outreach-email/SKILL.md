@@ -11,7 +11,17 @@ Parse the arguments:
 - **contact_email** — second argument (or ask if missing)
 - **company** — third argument (or ask if missing)
 - **role** — fourth argument (optional; the specific role being targeted at that company)
-- **job_url** — fifth argument (optional; link to the job posting)
+- **job_url** — fifth argument (optional; if not provided, look it up from the job tracker before composing — see Step 0 below)
+
+## Step 0 — Look up job posting URL (if not provided)
+
+If **job_url was not provided**, look it up from the job tracker:
+
+Use `mcp__gsheets__sheets_get_values` with:
+- `spreadsheetId`: `1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q`
+- `range`: `Sheet1!A:D`
+
+Scan column A for a row where the company name matches (case-insensitive). If a match is found, use the value in column D as `job_url`. If multiple rows match, use the last match (most recent). If no match is found in the sheet, ask the user for the URL before continuing.
 
 ## Sender background
 
