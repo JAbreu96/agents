@@ -282,3 +282,43 @@ else:
 
    > 📄 **[Joelchrist Abreu — Resume — {Company}]({viewUrl})**
    > {word_count} words · All rewrites applied · Bold formatting cleaned up
+
+6. **Download the resume as PDF:**
+
+   Export the Google Doc as a PDF and save it locally:
+
+   ```python
+   import warnings
+   warnings.filterwarnings("ignore")
+
+   from googleapiclient.discovery import build
+   from google.oauth2 import service_account
+   import os
+
+   COPY_DOC_ID = "{COPY_DOC_ID}"
+   SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+   COMPANY = "{Company}"
+   OUTPUT_DIR = "/Users/joelchristabreu/Documents/resumes"
+   os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+   creds = service_account.Credentials.from_service_account_file(
+       SERVICE_ACCOUNT_FILE,
+       scopes=["https://www.googleapis.com/auth/drive.readonly"]
+   )
+   drive = build("drive", "v3", credentials=creds)
+
+   content = drive.files().export(
+       fileId=COPY_DOC_ID,
+       mimeType="application/pdf"
+   ).execute()
+
+   filename = f"Joelchrist Abreu — Resume — {COMPANY}.pdf"
+   filepath = os.path.join(OUTPUT_DIR, filename)
+   with open(filepath, "wb") as f:
+       f.write(content)
+
+   print(f"✅ Saved to {filepath}")
+   ```
+
+   Append the local path to the result report:
+   > 💾 Saved to `/Users/joelchristabreu/Documents/resumes/Joelchrist Abreu — Resume — {Company}.pdf`
