@@ -73,7 +73,7 @@ Write the email in three sections. Keep the total length to ~150 words — punch
   linkedin.com/in/jc-abreu
   ```
 
-**Subject line:** Keep it short and specific. Do NOT use "Referral interest —" as a prefix. Use something like "Quick intro — Software Engineer from Meta" or "[Role] at [Company] — Software Engineer from Meta".
+**Subject line:** Keep it short and specific. Do NOT mention Meta or any employer in the subject line. Do NOT use "Referral interest —" as a prefix. Use something like "Quick intro — Software Engineer" or "[Role] at [Company]".
 
 ---
 

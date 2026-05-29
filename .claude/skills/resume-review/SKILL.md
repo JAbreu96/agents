@@ -134,7 +134,37 @@ The final resume **must fit on one page — use as much of that page as possible
 **If over 450 words:**
 - First trim any bullet over 40 words — cut filler, preserve the metric
 - Then remove the lowest-impact bullet from Meta only (never drop below 3 bullets per section)
-- Use `deleteContentRange` — always delete from **highest index to lowest** to avoid index shifting
+- Use `deleteContentRange` — never `replaceAllText` with empty string (leaves stranded empty paragraphs). Always delete from **highest index to lowest** to avoid index shifting:
+  ```python
+  # Re-read doc to get current indices after replaceAllText
+  doc = docs.documents().get(documentId=COPY_DOC_ID).execute()
+
+  bullets_to_remove = [
+      "FULL TEXT OF BULLET TO DELETE",
+      # one entry per bullet to remove
+  ]
+
+  ranges_to_delete = []
+  for el in doc.get("body", {}).get("content", []):
+      if "paragraph" not in el:
+          continue
+      text = "".join(
+          r.get("textRun", {}).get("content", "")
+          for r in el["paragraph"].get("elements", [])
+      ).strip()
+      if any(target in text for target in bullets_to_remove):
+          ranges_to_delete.append((el["startIndex"], el["endIndex"]))
+
+  # Must process highest index first to avoid index shifting
+  ranges_to_delete.sort(key=lambda x: x[0], reverse=True)
+
+  requests = [
+      {"deleteContentRange": {"range": {"startIndex": s, "endIndex": e}}}
+      for s, e in ranges_to_delete
+  ]
+  docs.documents().batchUpdate(documentId=COPY_DOC_ID, body={"requests": requests}).execute()
+  print(f"Deleted {len(requests)} bullets")
+  ```
 
 **If under 380 words:**
 - Add back a previously trimmed bullet, prioritizing the most role-relevant one
