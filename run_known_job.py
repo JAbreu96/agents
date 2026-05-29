@@ -22,7 +22,6 @@ LOCATION     = "Remote"
 SPREADSHEET  = "1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q"
 WORKSHEET    = "Sheet1"
 
-HUNTER_API_KEY = "776bd4e0680a27079ab151d0da7cc920d1c06994"
 
 RAW_SUMMARY = """**Company Context**
 - Modern marketing company (~200+ people), pairs PhD data scientists with award-winning creatives, strategists, engineers, and expert research teams
@@ -93,8 +92,6 @@ Chico Yu — Programmatic Director — chicoy@known.is (99% confidence)"""
 def main():
     from dotenv import load_dotenv
     load_dotenv()
-
-    os.environ.setdefault("HUNTER_API_KEY", HUNTER_API_KEY)
 
     record = JobRecord(
         url=JOB_URL,

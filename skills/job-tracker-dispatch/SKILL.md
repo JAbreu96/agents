@@ -95,7 +95,7 @@ Omit any section where no reliable data was found.
 
 ```bash
 # By domain:
-curl -s "https://api.hunter.io/v2/domain-search?domain={DOMAIN}&api_key=776bd4e0680a27079ab151d0da7cc920d1c06994&limit=10&seniority=senior,executive&department=engineering,executive,management" | python3 -c "
+curl -s "https://api.hunter.io/v2/domain-search?domain={DOMAIN}&api_key=$HUNTER_API_KEY&limit=10&seniority=senior,executive&department=engineering,executive,management" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 for e in d.get('data', {}).get('emails', [])[:5]:
@@ -103,7 +103,7 @@ for e in d.get('data', {}).get('emails', [])[:5]:
 "
 
 # By company name (job board URLs):
-curl -s "https://api.hunter.io/v2/domain-search?company={COMPANY_NAME}&api_key=776bd4e0680a27079ab151d0da7cc920d1c06994&limit=10&seniority=senior,executive&department=engineering,executive,management" | python3 -c "..."
+curl -s "https://api.hunter.io/v2/domain-search?company={COMPANY_NAME}&api_key=$HUNTER_API_KEY&limit=10&seniority=senior,executive&department=engineering,executive,management" | python3 -c "..."
 ```
 
 Format up to 5 contacts as `Full Name — Job Title — email@company.com (XX% confidence)`, one per line. Leave blank if no contacts found.

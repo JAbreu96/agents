@@ -24,7 +24,6 @@ LOCATION     = "New York, NY (Hybrid)"
 SPREADSHEET  = "1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q"
 WORKSHEET    = "Sheet1"
 
-HUNTER_API_KEY = "776bd4e0680a27079ab151d0da7cc920d1c06994"
 
 RAW_SUMMARY = """
 **Company Context**
@@ -73,9 +72,6 @@ NOTES = """**Recent News**
 
 
 def main():
-    # ── Set Hunter API key ────────────────────────────────────────────────────
-    os.environ.setdefault("HUNTER_API_KEY", HUNTER_API_KEY)
-
     # ── Look up contacts via Hunter.io ────────────────────────────────────────
     # reval.site is a job board — search by company name is not useful since
     # company is undisclosed. Search by reval.site domain to find the recruiter.

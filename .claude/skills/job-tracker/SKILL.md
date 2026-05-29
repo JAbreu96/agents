@@ -83,11 +83,11 @@ Determine the domain to search:
 
 Fetch (using WebFetch):
 ```
-https://api.hunter.io/v2/domain-search?domain={domain}&api_key=776bd4e0680a27079ab151d0da7cc920d1c06994&limit=10&seniority=senior,executive&department=engineering,executive,management
+https://api.hunter.io/v2/domain-search?domain={domain}&api_key=$HUNTER_API_KEY&limit=10&seniority=senior,executive&department=engineering,executive,management
 ```
 Or if searching by company name:
 ```
-https://api.hunter.io/v2/domain-search?company={company}&api_key=776bd4e0680a27079ab151d0da7cc920d1c06994&limit=10&seniority=senior,executive&department=engineering,executive,management
+https://api.hunter.io/v2/domain-search?company={company}&api_key=$HUNTER_API_KEY&limit=10&seniority=senior,executive&department=engineering,executive,management
 ```
 
 From the response, format up to 5 contacts as:
@@ -264,11 +264,79 @@ Follow the resume-review skill exactly:
 3. ATS + hiring manager scan
 4. Final summary with revised score
 5. Create Google Drive copy:
-   - Copy base doc `1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk` into folder `10QqchL7fb18Hw3Gd5KLBHct96ijIb3rR` titled `Joelchrist Abreu — Resume — {Company}`
+   - Copy base doc using `mcp__claude_ai_Google_Drive__copy_file` with:
+     - `fileId`: `1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk`
+     - `title`: `Joelchrist Abreu — Resume — {Company}`
+     - `parentId`: `10QqchL7fb18Hw3Gd5KLBHct96ijIb3rR`
+   - Save the returned file ID as `COPY_DOC_ID`
    - Apply rewritten bullets via `replaceAllText`
-   - Delete excess Meta bullets (keep 5, or 4 only if over 450 words)
+   - Delete excess Meta bullets (keep 5, or 4 only if over 450 words) using `deleteContentRange` — never `replaceAllText` with empty string (leaves stranded empty paragraphs). Use this pattern:
+     ```python
+     # Re-read doc to get current indices after replaceAllText
+     doc = docs.documents().get(documentId=COPY_DOC_ID).execute()
+
+     bullets_to_remove = [
+         "FULL TEXT OF BULLET TO DELETE",
+         # one entry per bullet to remove
+     ]
+
+     ranges_to_delete = []
+     for el in doc.get("body", {}).get("content", []):
+         if "paragraph" not in el:
+             continue
+         text = "".join(
+             r.get("textRun", {}).get("content", "")
+             for r in el["paragraph"].get("elements", [])
+         ).strip()
+         if any(target in text for target in bullets_to_remove):
+             ranges_to_delete.append((el["startIndex"], el["endIndex"]))
+
+     # Must process highest index first to avoid index shifting
+     ranges_to_delete.sort(key=lambda x: x[0], reverse=True)
+
+     requests = [
+         {"deleteContentRange": {"range": {"startIndex": s, "endIndex": e}}}
+         for s, e in ranges_to_delete
+     ]
+     docs.documents().batchUpdate(documentId=COPY_DOC_ID, body={"requests": requests}).execute()
+     print(f"Deleted {len(requests)} bullets")
+     ```
    - Verify word count is 380–450; insert/delete bullets as needed
    - **After any `insertText`, always call `updateTextStyle` with `bold: false` on the inserted range to prevent inherited bold formatting**
    - Report the final doc link and word count
+6. Download the resume as PDF and save locally:
+   ```python
+   import warnings
+   warnings.filterwarnings("ignore")
+   from googleapiclient.discovery import build
+   from google.oauth2 import service_account
+   import os
+
+   COPY_DOC_ID = "{COPY_DOC_ID}"
+   SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+   COMPANY = "{Company}"
+   OUTPUT_DIR = "/Users/joelchristabreu/Documents/resumes"
+   os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+   creds = service_account.Credentials.from_service_account_file(
+       SERVICE_ACCOUNT_FILE,
+       scopes=["https://www.googleapis.com/auth/drive.readonly"]
+   )
+   drive = build("drive", "v3", credentials=creds)
+
+   content = drive.files().export(
+       fileId=COPY_DOC_ID,
+       mimeType="application/pdf"
+   ).execute()
+
+   filename = f"Joelchrist Abreu — Resume — {COMPANY}.pdf"
+   filepath = os.path.join(OUTPUT_DIR, filename)
+   with open(filepath, "wb") as f:
+       f.write(content)
+
+   print(f"Saved to {filepath}")
+   ```
+   Append to the result report:
+   > 💾 Saved to `/Users/joelchristabreu/Documents/resumes/Joelchrist Abreu — Resume — {Company}.pdf`
 
 If the match score is **below 65**, skip this step entirely.

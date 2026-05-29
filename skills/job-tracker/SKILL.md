@@ -83,11 +83,11 @@ Determine the domain to search:
 
 Fetch (using WebFetch):
 ```
-https://api.hunter.io/v2/domain-search?domain={domain}&api_key=776bd4e0680a27079ab151d0da7cc920d1c06994&limit=10&seniority=senior,executive&department=engineering,executive,management
+https://api.hunter.io/v2/domain-search?domain={domain}&api_key=$HUNTER_API_KEY&limit=10&seniority=senior,executive&department=engineering,executive,management
 ```
 Or if searching by company name:
 ```
-https://api.hunter.io/v2/domain-search?company={company}&api_key=776bd4e0680a27079ab151d0da7cc920d1c06994&limit=10&seniority=senior,executive&department=engineering,executive,management
+https://api.hunter.io/v2/domain-search?company={company}&api_key=$HUNTER_API_KEY&limit=10&seniority=senior,executive&department=engineering,executive,management
 ```
 
 From the response, format up to 5 contacts as:
