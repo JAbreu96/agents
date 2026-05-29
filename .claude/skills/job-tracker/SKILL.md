@@ -17,13 +17,13 @@ Track the job posting at `$ARGUMENTS` by following these steps:
 
 If no URL was given, ask for one before continuing.
 
-**If the URL contains `linkedin.com`:** LinkedIn blocks automated fetching. Ask the user to provide manually:
+**If the URL contains `linkedin.com`, `indeed.com`, or `glassdoor.com`:** STOP — do not attempt to fetch, scrape, or use Playwright on these URLs under any circumstances. Their ToS explicitly prohibit automated access. Ask the user to provide manually:
 - Job title
 - Company name
 - Location
 - Job description (full text)
 
-Wait for their response, then skip to Step 2 with that data.
+Wait for their response, then skip to Step 2 with that data. The Playwright fallback below does NOT apply to these domains.
 
 **If the URL matches Greenhouse** (`greenhouse.io/{company}/jobs/{id}`):
 Fetch from the Greenhouse API instead of the page:
@@ -40,6 +40,27 @@ https://api.lever.co/v0/postings/{company}/{uuid}
 Extract `text` (title), `categories.location`, `createdAt` (ms timestamp → YYYY-MM-DD), and `descriptionPlain` (or `description` stripped of HTML).
 
 **Otherwise:** Fetch the page using WebFetch. Extract the job description from JSON-LD `application/ld+json` structured data if present (`description`, `hiringOrganization.name`, `jobLocation.address`, `datePosted`). Fall back to `<h1>` for title and main content areas for description.
+
+**If WebFetch returns fewer than 200 characters of meaningful content** (e.g. Ashby, Rippling, Workday, or any JS-rendered page), fall back to Playwright via Bash. **Never use this for `linkedin.com`, `indeed.com`, or `glassdoor.com` — always ask the user instead.**
+
+```python
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    page = browser.new_page()
+    page.goto("{URL}", wait_until="networkidle", timeout=15000)
+    try:
+        page.wait_for_selector("h1", timeout=8000)
+    except:
+        pass
+    text = page.inner_text("body")
+    browser.close()
+
+print(text)
+```
+
+Use the full `text` output as the raw content for Step 2 extraction.
 
 ---
 

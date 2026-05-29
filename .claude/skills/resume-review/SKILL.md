@@ -1,6 +1,6 @@
 ---
 name: resume-review
-description: Analyze a resume against a job description like a senior recruiter. Gives a match score, top missing keywords, red flags, rewrites the experience section using the Google XYZ formula, then runs an ATS + hiring manager scan. Use when the user provides a job URL or pastes a job description.
+description: Analyze a resume against a job description like a senior recruiter. Gives a match score, top missing keywords, red flags, rewrites the experience section using the Accomplished X / measured by Y / by doing Z formula, then runs an ATS + hiring manager scan. Use when the user provides a job URL or pastes a job description.
 argument-hint: "[job_url or company_name (optional)]"
 ---
 
@@ -81,7 +81,7 @@ Be blunt. What would make a recruiter pause or skip this resume for this specifi
 ## Step 3 — Rewrite the experience section
 
 Rewrite Joelchrist's experience section to:
-- Apply the **Google XYZ formula** to every bullet: _Accomplished X as measured by Y by doing Z_
+- Apply the **result-first formula** to every bullet: _[Impact verb] [X] as measured by [Y], by doing [Z]_ — lead with the impact, quantify it, then explain the action. Vary the opening verb naturally (Drove, Delivered, Reduced, Cut, Grew, Shipped, Improved, Eliminated, Accelerated, Established, Aligned, etc.) — never start multiple bullets with the same word, and never use "Accomplished" as a default opener
 - Naturally incorporate the missing keywords from Step 2 **only where they genuinely apply** — if a keyword can't be tied to real work in the base resume, flag it as a gap instead of forcing it
 - Address the red flags identified in Step 2 through honest reframing, not fabrication
 - Maintain the same company names, titles, and date ranges
