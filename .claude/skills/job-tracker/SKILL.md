@@ -110,7 +110,7 @@ from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
 DOC_ID = "1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk"
-SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 
 creds = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE,
@@ -212,7 +212,7 @@ import json, urllib.request
 from google.oauth2 import service_account
 import google.auth.transport.requests
 
-SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 SPREADSHEET_ID = "1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q"
 SHEET_ID = 138342806  # Sheet1
 ROW_N = {N}  # replace with the actual 1-based row number written in Step 7
@@ -313,7 +313,7 @@ Follow the resume-review skill exactly:
    import os
 
    COPY_DOC_ID = "{COPY_DOC_ID}"
-   SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+   SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
    COMPANY = "{Company}"
    OUTPUT_DIR = "/Users/joelchristabreu/Documents/resumes"
    os.makedirs(OUTPUT_DIR, exist_ok=True)

@@ -10,7 +10,7 @@ Analyze Joelchrist's resume against a job description using the arguments: `$ARG
 
 - **Google Doc ID:** `1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk`
 - **Google Drive Resumes Folder ID:** `10QqchL7fb18Hw3Gd5KLBHct96ijIb3rR`
-- **Service Account:** `/Users/joelchristabreu/Documents/agents-491602-service-account.json`
+- **Service Account:** path set via `GOOGLE_APPLICATION_CREDENTIALS` env var
 - **Link:** https://docs.google.com/document/d/1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk/edit
 
 **Read the live resume at the start using the Docs API:**
@@ -20,7 +20,7 @@ from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
 DOC_ID = "1WJRx42io40tkv38KS2dO1MharN5T7wh1ZFNDftjCVtk"
-SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 
 creds = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE,
@@ -206,7 +206,7 @@ from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
 COPY_DOC_ID = "{COPY_DOC_ID}"  # from step 2
-SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 
 creds = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE,
@@ -258,7 +258,7 @@ from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
 COPY_DOC_ID = "{COPY_DOC_ID}"
-SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 
 creds = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE,
@@ -326,7 +326,7 @@ else:
    import os
 
    COPY_DOC_ID = "{COPY_DOC_ID}"
-   SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+   SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
    COMPANY = "{Company}"
    OUTPUT_DIR = "/Users/joelchristabreu/Documents/resumes"
    os.makedirs(OUTPUT_DIR, exist_ok=True)

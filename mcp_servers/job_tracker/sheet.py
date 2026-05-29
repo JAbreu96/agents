@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 SPREADSHEET_ID = "1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q"
 WORKSHEET = "Sheet1"
 ARCHIVE_WORKSHEET = "Archive"
-SERVICE_ACCOUNT_FILE = "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
