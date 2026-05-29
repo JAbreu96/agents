@@ -115,8 +115,19 @@ def add_job(
     row[COL_OUTREACH] = ""
     row[COL_DATE_APPLIED] = ""
     row[COL_STATUS] = status.strip()
-    ws.append_row(row, value_input_option="USER_ENTERED")
-    new_row_index = len(ws.get_all_values())
+
+    # Find the last row with data in column A, then write to last_row + 1.
+    # This correctly appends at the end of existing data without overshooting
+    # the table boundary (as append_row does) or landing in a gap (as
+    # first-empty-row scanning does when rows have been deleted).
+    all_values = ws.get_all_values()
+    last_data_row = 1  # header is row 1
+    for i, r in enumerate(all_values[1:], start=2):
+        if r and r[0].strip():
+            last_data_row = i
+    new_row_index = last_data_row + 1
+    ws.update(f"A{new_row_index}:J{new_row_index}", [row], value_input_option="USER_ENTERED")
+
     return _row_to_dict(row, new_row_index)
 
 
