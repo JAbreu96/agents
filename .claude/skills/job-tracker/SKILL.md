@@ -9,7 +9,7 @@ Track the job posting at `$ARGUMENTS` by following these steps:
 ## Spreadsheet info
 - Spreadsheet ID: `1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q`
 - Worksheet: `Sheet1`
-- Column layout (1-based): A=Company, B=Job Title, C=Summary, D=Link, E=Date Added, F=Contacts, G=Notes, H=Outreach Date
+- Column layout (1-based): A=Company, B=Position Title, C=Job Summary, D=Location, E=Link, F=Date Added, G=Contacts, H=Notes, I=Outreach Date, J=Date Applied, K=Status
 
 ---
 
@@ -193,10 +193,10 @@ If a hard location mismatch is detected (role requires relocation to another cou
 
 ## Step 6 — Check for duplicates and find next empty row
 
-Use the `gsheets` MCP tool to read the full sheet (`Sheet1!A:H`) to:
+Use the `gsheets` MCP tool to read the full sheet (`Sheet1!A:I`) to:
 
-1. **Check for duplicates** — scan column D for the job URL.
-   - **If found at row N**: update columns A–D and F–G at that row. **Never touch column E (Date Added) or H (Outreach Date).** Report that the job was updated, not added. Stop here.
+1. **Check for duplicates** — scan column E for the job URL.
+   - **If found at row N**: update columns A–E and G–H at that row. **Never touch column F (Date Added) or I (Outreach Date).** Report that the job was updated, not added. Stop here.
 
 2. **Find the next empty row** — scan column A from row 2 downward and find the first row where column A is empty. Call this row N.
 
@@ -206,11 +206,11 @@ Use the `gsheets` MCP tool to read the full sheet (`Sheet1!A:H`) to:
 
 Use `sheets_update_values` to write to row N (the first empty row found in Step 6):
 
-| A | B | C | D | E | F | G | H |
-|---|---|---|---|---|---|---|---|
-| Company | Job Title | Summary | Link | Today's date (YYYY-MM-DD) | Contacts | Notes | _(leave blank)_ |
+| A | B | C | D | E | F | G | H | I |
+|---|---|---|---|---|---|---|---|---|
+| Company | Position Title | Job Summary | Location | Link | Date Added (YYYY-MM-DD) | Contacts | Notes | _(leave blank)_ |
 
-For column G (Notes), combine `MATCH_BLOCK` with the research notes from Step 3:
+For column H (Notes), combine `MATCH_BLOCK` with the research notes from Step 3:
 ```
 Match Score: X/100 — [rationale]
 Gaps: [gap1], [gap2], [gap3]
@@ -218,7 +218,7 @@ Gaps: [gap1], [gap2], [gap3]
 [Research notes from Step 3]
 ```
 
-Use range `Sheet1!A{N}:H{N}`.
+Use range `Sheet1!A{N}:I{N}`.
 
 **If no empty row exists within the current range** (the sheet is full): use `sheets_append_values` with `insertDataOption: INSERT_ROWS` to add a new row beyond the current range.
 
@@ -272,12 +272,18 @@ State:
 
 ---
 
-## Step 10 — Auto-create tailored resume (if good fit)
+## Step 10 — Offer tailored resume (if good fit)
 
-If the match score from Step 5 is **65/100 or above**, automatically create a tailored resume copy by running the full resume-review skill pipeline (Steps 2–6 of the resume-review skill) using:
+If the match score from Step 5 is **65/100 or above**, ask the user:
+
+> Would you like me to create a tailored resume for **{Company}**?
+
+Wait for their response. If they say yes, create a tailored resume copy by running the full resume-review skill pipeline (Steps 2–6 of the resume-review skill) using:
 - The job description already fetched in Step 1
 - The resume already read in Step 5
 - Company name extracted from Step 2
+
+If they say no (or don't respond), stop here.
 
 Follow the resume-review skill exactly:
 1. Run recruiter analysis (match score + gaps) — you already have this from Step 5, so skip to rewrites
