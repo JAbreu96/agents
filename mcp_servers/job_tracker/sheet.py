@@ -20,13 +20,14 @@ SCOPES = [
 COL_COMPANY = 0
 COL_TITLE = 1
 COL_SUMMARY = 2
-COL_LINK = 3
-COL_DATE_ADDED = 4
-COL_CONTACTS = 5
-COL_NOTES = 6
-COL_OUTREACH = 7
-COL_DATE_APPLIED = 8
-COL_STATUS = 9
+COL_LOCATION = 3
+COL_LINK = 4
+COL_DATE_ADDED = 5
+COL_CONTACTS = 6
+COL_NOTES = 7
+COL_OUTREACH = 8
+COL_DATE_APPLIED = 9
+COL_STATUS = 10
 
 
 _client: gspread.Client | None = None
@@ -104,10 +105,11 @@ def add_job(
     """Append a new job row to Sheet1. Returns the inserted row dict."""
     ws = get_sheet()
     date_str = date_added.strip() if date_added.strip() else str(date.today())
-    row = [""] * 10
+    row = [""] * 11
     row[COL_COMPANY] = company.strip()
     row[COL_TITLE] = title.strip()
     row[COL_SUMMARY] = summary.strip()
+    row[COL_LOCATION] = ""
     row[COL_LINK] = link.strip()
     row[COL_DATE_ADDED] = date_str
     row[COL_CONTACTS] = contacts.strip()
@@ -126,7 +128,7 @@ def add_job(
         if r and r[0].strip():
             last_data_row = i
     new_row_index = last_data_row + 1
-    ws.update(f"A{new_row_index}:J{new_row_index}", [row], value_input_option="USER_ENTERED")
+    ws.update(f"A{new_row_index}:K{new_row_index}", [row], value_input_option="USER_ENTERED")
 
     return _row_to_dict(row, new_row_index)
 

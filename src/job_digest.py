@@ -19,14 +19,18 @@ from google.oauth2.service_account import Credentials
 DEFAULT_SPREADSHEET = "https://docs.google.com/spreadsheets/d/1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q/edit"
 DEFAULT_WORKSHEET = "Sheet1"
 
-# Column indices (0-based) matching job_agent.py schema
-COL_TITLE = 0
-COL_SUMMARY = 1
-COL_LINK = 2
-COL_DATE_ADDED = 3
-COL_CONTACTS = 4
-COL_NOTES = 5
-COL_DATE_APPLIED = 6
+# Column indices (0-based) matching current sheet layout
+COL_COMPANY = 0
+COL_TITLE = 1
+COL_SUMMARY = 2
+COL_LOCATION = 3
+COL_LINK = 4
+COL_DATE_ADDED = 5
+COL_CONTACTS = 6
+COL_NOTES = 7
+COL_OUTREACH = 8
+COL_DATE_APPLIED = 9
+COL_STATUS = 10
 
 
 def _sheet_client(service_account_json: str) -> gspread.Client:
@@ -83,18 +87,21 @@ def get_all_rows(
     rows = []
     for raw in all_values[1:]:  # skip header
         # pad short rows
-        while len(raw) <= COL_DATE_APPLIED:
+        while len(raw) <= COL_STATUS:
             raw.append("")
         if not any(raw):
             continue
         rows.append({
+            "company": raw[COL_COMPANY].strip(),
             "title": raw[COL_TITLE].strip(),
             "summary": raw[COL_SUMMARY].strip(),
             "link": raw[COL_LINK].strip(),
             "date_added": raw[COL_DATE_ADDED].strip(),
             "contacts": raw[COL_CONTACTS].strip(),
             "notes": raw[COL_NOTES].strip(),
+            "outreach_date": raw[COL_OUTREACH].strip(),
             "date_applied": raw[COL_DATE_APPLIED].strip(),
+            "status": raw[COL_STATUS].strip(),
         })
     return rows
 
