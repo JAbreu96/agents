@@ -35,7 +35,7 @@ Scan column A for a row where the company name matches (case-insensitive). If a 
 - Built an interactive asset-relationship graph visualization tool to replace manual ID lookups, improving debuggability for ops and engineers
 - Developed a multi-category dashboard component adopted by 545 accounts; resolved production out-of-memory issues via backend query optimization
 - Drove cross-functional work via 10+ design docs, stakeholder alignment, and structured feedback loops
-- Stack: React, TypeScript, GraphQL, Hack (PHP), Node.js
+- Stack: Hack (PHP), React, JavaScript, Flow (Meta's TypeScript-like type system), MySQL
 
 **Additional background:**
 - Razortooth Communications (Apr 2023–Apr 2024): BLE firmware + mobile QA
@@ -58,7 +58,7 @@ Write the email in three sections. Keep the total length to ~150 words — punch
   - For AI/ML, automation, or data-heavy companies: lead with the AI agent tool (integrated across five production AI agents).
   - For pure product/platform or frontend-focused roles with no AI angle: lead with the GraphQL API + data export work and dashboard adoption metrics.
   - When in doubt, lead with AI — it's the most differentiating work.
-- End with a brief mention of the stack (React, TypeScript, GraphQL) if it seems relevant.
+- End with a brief mention of the stack (Hack/PHP, React, JavaScript, Flow, MySQL) if it seems relevant.
 
 ### Outro
 - Tie the Meta experience back to why this company/role is compelling.
