@@ -96,30 +96,7 @@ Omit any section where no reliable data is found. Be factual and concise. End th
 
 ---
 
-## Step 4 — Look up contacts via Hunter.io
-
-Determine the domain to search:
-- If the URL is from a known job board domain (greenhouse.io, lever.co, ashbyhq.com, gem.com, builtin.com, builtinnyc.com, workday.com, myworkdayjobs.com, icims.com, jobvite.com, smartrecruiters.com, taleo.net, indeed.com, glassdoor.com), search by **company name** instead of domain.
-- Otherwise, use the domain from the job URL (strip `www.`).
-
-Fetch (using WebFetch):
-```
-https://api.hunter.io/v2/domain-search?domain={domain}&api_key=$HUNTER_API_KEY&limit=10&seniority=senior,executive&department=engineering,executive,management
-```
-Or if searching by company name:
-```
-https://api.hunter.io/v2/domain-search?company={company}&api_key=$HUNTER_API_KEY&limit=10&seniority=senior,executive&department=engineering,executive,management
-```
-
-From the response, format up to 5 contacts as:
-```
-Full Name — Job Title — email@company.com (XX% confidence)
-```
-One per line. If no contacts are found, leave this field blank.
-
----
-
-## Step 5 — Resume match score
+## Step 4 — Resume match score
 
 Read the base resume from the Google Docs API, then score it against this job description.
 
@@ -169,11 +146,11 @@ Gaps: [gap1], [gap2], [gap3]
 ```
 (Leave a blank line after the gaps so the research notes from Step 3 are visually separated.)
 
-Save this as `MATCH_BLOCK` — it will be written to column G in Step 8.
+Save this as `MATCH_BLOCK` — it will be written to column H in Step 6.
 
 ### Threshold gate
 
-**If the match score is below 65/100**, stop here and do NOT proceed to Steps 6–9.
+**If the match score is below 65/100**, stop here and do NOT proceed to Steps 5–8.
 
 Instead, report:
 
@@ -191,7 +168,7 @@ If a hard location mismatch is detected (role requires relocation to another cou
 
 ---
 
-## Step 6 — Check for duplicates and find next empty row
+## Step 5 — Check for duplicates and find next empty row
 
 Use the `gsheets` MCP tool to read the full sheet (`Sheet1!A:I`) to:
 
@@ -202,7 +179,7 @@ Use the `gsheets` MCP tool to read the full sheet (`Sheet1!A:I`) to:
 
 ---
 
-## Step 7 — Write to the sheet
+## Step 6 — Write to the sheet
 
 Use `sheets_update_values` to write to row N (the first empty row found in Step 6):
 
@@ -224,7 +201,7 @@ Use range `Sheet1!A{N}:I{N}`.
 
 ---
 
-## Step 8 — Set row height
+## Step 7 — Set row height
 
 After writing, cap the new row's height to 21px using the Google Sheets API via Python/Bash:
 
@@ -262,25 +239,25 @@ urllib.request.urlopen(req)
 
 ---
 
-## Step 9 — Report result
+## Step 8 — Report result
 
 State:
 - Job title and company
 - Whether it was **newly added** or **updated** (duplicate URL)
 - Row it was written to (if available)
-- Match score and top 3 gaps from Step 5
+- Match score and top 3 gaps from Step 4
 
 ---
 
-## Step 10 — Offer tailored resume (if good fit)
+## Step 9 — Offer tailored resume (if good fit)
 
-If the match score from Step 5 is **65/100 or above**, ask the user:
+If the match score from Step 4 is **65/100 or above**, ask the user:
 
 > Would you like me to create a tailored resume for **{Company}**?
 
 Wait for their response. If they say yes, create a tailored resume copy by running the full resume-review skill pipeline (Steps 2–6 of the resume-review skill) using:
 - The job description already fetched in Step 1
-- The resume already read in Step 5
+- The resume already read in Step 4
 - Company name extracted from Step 2
 
 If they say no (or don't respond), stop here.
