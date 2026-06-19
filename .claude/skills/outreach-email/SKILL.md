@@ -11,22 +11,9 @@ Parse the arguments:
 - **contact_email** — second argument (or ask if missing; for linkedin mode this can be omitted or set to "linkedin")
 - **company** — third argument (or ask if missing)
 - **role** — fourth argument (optional; the specific role being targeted at that company)
-- **job_url** — fifth argument (optional; if not provided, look it up from the job tracker — see Step 0)
 - **mode** — detect from arguments or context: `email` (default) or `linkedin`
   - If the user mentions "LinkedIn", "connection request", "connect note", or "LinkedIn note", set mode to `linkedin`
   - Otherwise default to `email`
-
-## Step 0 — Look up job posting URL (if not provided)
-
-If **job_url was not provided**, look it up from the job tracker:
-
-Use `mcp__gsheets__sheets_get_values` with:
-- `spreadsheetId`: `1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q`
-- `range`: `Sheet1!A:D`
-
-Scan column A for a row where the company name matches (case-insensitive). If a match is found, use the value in column D as `job_url`. If multiple rows match, use the last match (most recent). If no match is found in the sheet, ask the user for the URL before continuing.
-
-**LinkedIn mode exception:** Skip the job URL lookup for linkedin mode — the note is too short to include a URL.
 
 ## Sender background
 
@@ -52,28 +39,45 @@ Scan column A for a row where the company name matches (case-insensitive). If a 
 
 *Use this mode when `mode` is `email` (the default).*
 
-### Step 1 — Compose the email
+### Step 1 — Research the company
 
-Write the email in three sections. Keep the total length to ~150 words — punchy, not a wall of text.
+Before writing, use `WebSearch` to gather 2–3 specific, recent facts about the company:
+- A recent product launch, engineering blog post, initiative, or public announcement
+- Something about their technical direction, scale challenges, or mission
+- If a role was provided, look for signals of what they're actively working on or hiring for
 
-#### Intro
-- One sentence: who you are and why you're reaching out to this specific person/company.
-- If a role was provided, reference it. Otherwise keep it general ("exploring opportunities at [company]").
-- Warm but professional — not sycophantic.
+The goal is to open the email with something that proves you actually looked — not generic praise. Aim for a specific detail (a feature, a blog post title, a stated goal) the contact will recognize immediately.
 
-#### Experience
-- 2–3 sentences max. **Always lead with Meta.** Use past tense — "recently wrapped up a year at Meta" (not "wrapping up").
-- Pick the 1–2 Meta highlights most relevant to the company or role. **Default to leading with the AI agent tool** unless the role is clearly non-AI (e.g., pure frontend, media/content platform). For example:
+### Step 2 — Compose the email
+
+Write the email in four sections. Keep the total length to ~160 words — punchy, not a wall of text.
+
+#### Greeting
+- Always open with: `Hi [first name],`
+
+#### Quick intro (1–2 sentences)
+- Open with who you are. **Always lead with Meta.** Use past tense — "recently wrapped up a year at Meta."
+- Keep it tight — name, role, and one grounding fact. This is not the place for highlights yet.
+- **Do NOT imply you're job hunting or signal urgency about what's next.** The goal is to open a conversation, not signal need.
+- Example: "My name is Joelchrist — I'm a software engineer who recently wrapped up a year at Meta."
+
+#### Company hook (1–2 sentences)
+- Transition into what you found about the company: reference the specific thing you researched.
+- Frame it as genuine interest, not flattery. Example: "I came across [Company]'s work on [specific thing] — [one authentic reaction to it]."
+
+#### Who I am / Value anchor (2–3 sentences)
+- Pick the 1–2 Meta highlights most relevant to the company or role:
   - For AI/ML, automation, or data-heavy companies: lead with the AI agent tool (integrated across five production AI agents).
   - For pure product/platform or frontend-focused roles with no AI angle: lead with the GraphQL API + data export work and dashboard adoption metrics.
   - When in doubt, lead with AI — it's the most differentiating work.
-- End with a brief mention of the stack (Hack/PHP, React, JavaScript, Flow, MySQL) if it seems relevant.
+- Keep it factual and specific — one metric beats three vague claims.
+- Then draw the line to what they need: connect your experience directly to what the company is working on or looking for. Do NOT just restate your resume.
+- Example: "Given that you're [expanding X / building Y / dealing with Z], I think the [AI agent work / platform work] I did at Meta maps well to that problem."
 
-#### Outro
-- Tie the Meta experience back to why this company/role is compelling.
-- Make the ask clear and low-friction: ask if they'd be open to a quick chat or if they'd be willing to point you to the right person.
-- If a job_url was provided, include it as a plain line at the end of the email: `Job posting: <url>`
-- Close politely — no pressure, just genuine interest.
+#### Call to connect (1–2 sentences)
+- Make the ask low-friction and curiosity-driven — ask if they'd be open to a quick chat about the work, not about a job.
+- Do NOT frame this as a job search. The ask is to connect and learn, not to get a referral or be considered.
+- Close with warmth — no pressure, just genuine interest.
 - Always end with this exact signature block:
   ```
   Thanks,
@@ -84,19 +88,29 @@ Write the email in three sections. Keep the total length to ~150 words — punch
 
 **Subject line:** Keep it short and specific. Do NOT mention Meta or any employer in the subject line. Do NOT use "Referral interest —" as a prefix. Use something like "Quick intro — Software Engineer" or "[Role] at [Company]".
 
-### Step 2 — Create the Gmail draft
+### Step 3 — Preview and confirm
 
-Use `mcp__gmail_personal__draft_email` with:
+Display the full email for review before saving anything:
+
+```
+Subject: [subject line]
+
+[full email body]
+```
+
+Ask: **"Save as draft?"** — wait for the user to confirm before proceeding.
+
+### Step 4 — Create the Gmail draft
+
+Only after the user confirms. Use `mcp__gmail_personal__draft_email` with:
 - `to`: the contact's email address
-- `subject`: the subject line from Step 1
-- `body`: the plain-text email body from Step 1
+- `subject`: the subject line from Step 2
+- `body`: the plain-text email body from Step 2
 
-### Step 3 — Confirm
+### Step 5 — Confirm
 
 Report back:
-- Contact name and email the draft was sent to
-- Subject line used
-- A preview of the email body (full text)
+- Contact name and email the draft was saved to
 - Confirm the draft was saved successfully
 
 ---
