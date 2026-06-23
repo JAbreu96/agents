@@ -88,6 +88,11 @@ Write the email in four sections. Keep the total length to ~160 words — punchy
 
 **Subject line:** Keep it short and specific. Do NOT mention Meta or any employer in the subject line. Do NOT use "Referral interest —" as a prefix. Use something like "Quick intro — Software Engineer" or "[Role] at [Company]".
 
+**Content guardrails — never include in the email body:**
+- Funding amounts, valuation figures, or investment round details (e.g., "raised $355M", "$4.65B valuation", "Series C") — these read as performative research, not genuine interest
+- Headcount or employee count statistics
+- Revenue figures or ARR numbers unless the contact explicitly mentioned them first
+
 ### Step 3 — Preview and confirm
 
 Display the full email for review before saving anything:
