@@ -201,7 +201,37 @@ Use range `Sheet1!A{N}:I{N}`.
 
 ---
 
-## Step 7 — Set row height
+## Step 7 — Sync to local SQLite cache
+
+After writing to the sheet, immediately upsert the same row into the local SQLite DB so lookups stay fast and in sync.
+
+```python
+import sys
+sys.path.insert(0, '/Users/joelchristabreu/Documents/projects/agents')
+from src.jobs_db import upsert_job
+
+upsert_job({
+    "company": "{Company}",
+    "position_title": "{Position Title}",
+    "job_summary": "{Job Summary}",
+    "location": "{Location}",
+    "link": "{Link}",
+    "date_added": "{Date Added}",
+    "contacts": "{Contacts}",
+    "notes": "{Notes}",
+    "outreach_date": "",
+    "date_applied": "",
+    "status": "",
+    "followup_log": "",
+})
+print("SQLite synced.")
+```
+
+Replace each `{placeholder}` with the actual value written to the sheet in Step 6.
+
+---
+
+## Step 8 — Set row height
 
 After writing, cap the new row's height to 21px using the Google Sheets API via Python/Bash:
 
@@ -239,7 +269,7 @@ urllib.request.urlopen(req)
 
 ---
 
-## Step 8 — Report result
+## Step 9 — Report result
 
 State:
 - Job title and company
@@ -249,7 +279,7 @@ State:
 
 ---
 
-## Step 9 — Offer tailored resume (if good fit)
+## Step 10 — Offer tailored resume (if good fit)
 
 If the match score from Step 4 is **65/100 or above**, ask the user:
 

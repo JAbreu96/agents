@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Job Tracker — Kanban</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f8;
+    --card: #ffffff;
+    --border: #e2e2e6;
+    --text: #1d1d1f;
+    --muted: #6b6b74;
+    --accent: #3457d5;
+    --col-bg: #eeeef1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16161a;
+      --card: #1f1f24;
+      --border: #303038;
+      --text: #eaeaef;
+      --muted: #9a9aa5;
+      --accent: #6f8dff;
+      --col-bg: #1b1b20;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  h1 { font-size: 18px; margin: 0; }
+  .stats { color: var(--muted); font-size: 13px; }
+  nav.view-nav { display: flex; gap: 4px; }
+  nav.view-nav a {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    text-decoration: none;
+    color: var(--muted);
+  }
+  nav.view-nav a.active { background: var(--accent); color: #fff; }
+  nav.view-nav a:not(.active):hover { background: var(--bg); }
+  .controls {
+    padding: 14px 28px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+  }
+  input[type="search"] {
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card);
+    color: var(--text);
+    font-size: 13px;
+    flex: 1;
+    min-width: 200px;
+  }
+  main {
+    padding: 20px 28px 40px;
+    overflow-x: auto;
+  }
+  .board {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    min-height: 60vh;
+  }
+  .column {
+    background: var(--col-bg);
+    border-radius: 10px;
+    width: 260px;
+    min-width: 260px;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 180px);
+  }
+  .column-header {
+    padding: 12px 14px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .column-count {
+    background: var(--card);
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .column-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 40px;
+  }
+  .column-body.drag-over { outline: 2px dashed var(--accent); outline-offset: -4px; border-radius: 8px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    cursor: grab;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .card:active { cursor: grabbing; }
+  .card.dragging { opacity: 0.4; }
+  .card .company {
+    font-weight: 600;
+    color: var(--text);
+    display: block;
+    margin-bottom: 2px;
+    text-decoration: none;
+  }
+  .card .company:hover { color: var(--accent); }
+  .card .title { color: var(--muted); font-size: 12px; display: block; margin-bottom: 4px; }
+  .card .meta { color: var(--muted); font-size: 11px; display: flex; justify-content: space-between; gap: 6px; }
+  .empty-col { color: var(--muted); font-size: 12px; padding: 10px 4px; text-align: center; }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    z-index: 100;
+  }
+  .modal-backdrop.hidden { display: none; }
+  .modal-panel {
+    background: var(--card);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 520px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+    padding: 20px 22px 22px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+  .modal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .modal-head h2 { font-size: 16px; margin: 0 0 2px; }
+  .modal-head a.company-link {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 16px;
+  }
+  .modal-head a.company-link:hover { text-decoration: underline; }
+  .modal-subtitle { color: var(--muted); font-size: 12px; }
+  .modal-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+  .modal-close:hover { background: var(--bg); color: var(--text); }
+  .modal-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+  .modal-field label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+  }
+  .modal-field .editable, .modal-field select {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    min-height: 16px;
+  }
+  .modal-field .editable[data-field="notes"] {
+    white-space: pre-wrap;
+    min-height: 90px;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .modal-field .editable:focus, .modal-field select:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+  .saved-flash { animation: flash 0.6s ease; }
+  @keyframes flash { from { background: #d9f5df; } to { background: var(--bg); } }
+
+  .modal-field input[type="date"] {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 9px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    width: 100%;
+  }
+  .non-date-value {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: var(--bg);
+    font-size: 13px;
+  }
+  .non-date-value .raw-text { flex: 1; color: var(--text); }
+  .non-date-value button {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--accent);
+    font-size: 11px;
+    padding: 3px 7px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .non-date-value button:hover { background: var(--card); }
+  .followup-field {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .followup-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px 6px 3px 10px;
+    font-size: 12px;
+  }
+  .followup-chip.non-date { color: var(--muted); font-style: italic; }
+  .followup-chip button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 999px;
+  }
+  .followup-chip button:hover { background: var(--card); color: var(--text); }
+  .followup-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .followup-add input[type="date"] {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 6px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 12px;
+  }
+  .followup-add button {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--accent);
+    font-size: 11px;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+  .followup-add button:hover { background: var(--card); }
+  .followup-add button:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Job Tracker — local cache</h1>
+  <nav class="view-nav">
+    <a href="/">Table</a>
+    <a href="/kanban" class="active">Kanban</a>
+  </nav>
+  <div class="stats" id="stats"></div>
+</header>
+<div class="controls">
+  <input type="search" id="search" placeholder="Search company, title, notes…">
+</div>
+<main>
+  <div class="board" id="board"></div>
+</main>
+
+<div class="modal-backdrop hidden" id="modalBackdrop">
+  <div class="modal-panel" id="modalPanel"></div>
+</div>
+
+<script>
+const STATUS_VALUES = {{ status_values | tojson }};
+// Blank status becomes its own "Not Tracked" column, placed first.
+const COLUMNS = ["", ...STATUS_VALUES.filter(s => s !== "")];
+const COLUMN_LABELS = { "": "Not Tracked" };
+
+let allJobs = [];
+
+async function loadJobs() {
+  const res = await fetch('/api/jobs');
+  allJobs = await res.json();
+  render();
+}
+
+function rowKey(job) {
+  return `${job.company}::${job.date_added}`;
+}
+
+function render() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const filtered = allJobs.filter(j => {
+    if (!q) return true;
+    const haystack = [j.company, j.position_title, j.notes, j.location].join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
+
+  document.getElementById('stats').textContent = `${filtered.length} of ${allJobs.length} jobs`;
+
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+
+  for (const status of COLUMNS) {
+    const jobsInColumn = filtered.filter(j => (j.status || '') === status);
+
+    const column = document.createElement('div');
+    column.className = 'column';
+    column.dataset.status = status;
+
+    const headerEl = document.createElement('div');
+    headerEl.className = 'column-header';
+    const label = document.createElement('span');
+    label.textContent = COLUMN_LABELS[status] || status;
+    const count = document.createElement('span');
+    count.className = 'column-count';
+    count.textContent = jobsInColumn.length;
+    headerEl.appendChild(label);
+    headerEl.appendChild(count);
+    column.appendChild(headerEl);
+
+    const body = document.createElement('div');
+    body.className = 'column-body';
+    body.dataset.status = status;
+
+    if (jobsInColumn.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-col';
+      empty.textContent = 'No jobs';
+      body.appendChild(empty);
+    }
+
+    for (const job of jobsInColumn) {
+      body.appendChild(makeCard(job));
+    }
+
+    addDropHandlers(body);
+    column.appendChild(body);
+    board.appendChild(column);
+  }
+}
+
+function makeCard(job) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.draggable = true;
+  card.dataset.key = rowKey(job);
+
+  const company = document.createElement(job.link ? 'a' : 'span');
+  company.className = 'company';
+  company.textContent = job.company;
+  if (job.link) {
+    company.href = job.link;
+    company.target = '_blank';
+    company.rel = 'noopener noreferrer';
+  }
+  card.appendChild(company);
+
+  const title = document.createElement('span');
+  title.className = 'title';
+  title.textContent = job.position_title || '';
+  card.appendChild(title);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const loc = document.createElement('span');
+  loc.textContent = job.location || '';
+  const date = document.createElement('span');
+  date.textContent = job.date_added || '';
+  meta.appendChild(loc);
+  meta.appendChild(date);
+  card.appendChild(meta);
+
+  let didDrag = false;
+  card.addEventListener('dragstart', (e) => {
+    didDrag = true;
+    card.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', card.dataset.key);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  card.addEventListener('click', () => {
+    if (didDrag) {
+      didDrag = false;
+      return;
+    }
+    openModal(job);
+  });
+
+  return card;
+}
+
+function openModal(job) {
+  const backdrop = document.getElementById('modalBackdrop');
+  const panel = document.getElementById('modalPanel');
+  panel.innerHTML = '';
+  panel.appendChild(buildModalContent(job));
+  backdrop.classList.remove('hidden');
+}
+
+function closeModal() {
+  document.getElementById('modalBackdrop').classList.add('hidden');
+}
+
+function buildModalContent(job) {
+  const frag = document.createDocumentFragment();
+
+  const head = document.createElement('div');
+  head.className = 'modal-head';
+
+  const titleBlock = document.createElement('div');
+  if (job.link) {
+    const a = document.createElement('a');
+    a.className = 'company-link';
+    a.href = job.link;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = job.company;
+    titleBlock.appendChild(a);
+  } else {
+    const h2 = document.createElement('h2');
+    h2.textContent = job.company;
+    titleBlock.appendChild(h2);
+  }
+  const subtitle = document.createElement('div');
+  subtitle.className = 'modal-subtitle';
+  subtitle.textContent = [job.position_title, job.location, job.date_added].filter(Boolean).join(' · ');
+  titleBlock.appendChild(subtitle);
+  head.appendChild(titleBlock);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'modal-close';
+  closeBtn.innerHTML = '&times;';
+  closeBtn.addEventListener('click', closeModal);
+  head.appendChild(closeBtn);
+
+  frag.appendChild(head);
+
+  frag.appendChild(buildModalStatusField(job));
+  frag.appendChild(buildModalTextField('Contacts', job, 'contacts'));
+  frag.appendChild(buildModalDateField('Outreach Date', job, 'outreach_date'));
+  frag.appendChild(buildModalDateField('Date Applied', job, 'date_applied'));
+  frag.appendChild(buildModalFollowupField('Follow-up Log', job, 'followup_log'));
+  frag.appendChild(buildModalTextField('Notes', job, 'notes', true));
+
+  return frag;
+}
+
+function isValidISODate(str) {
+  if (!str) return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
+  return !isNaN(Date.parse(str));
+}
+
+function parseFollowupLog(raw) {
+  return (raw || '').split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function serializeFollowupLog(tokens) {
+  return tokens.join(', ');
+}
+
+function buildModalDateField(label, job, field) {
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-field';
+
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  wrap.appendChild(labelEl);
+
+  wrap.appendChild(renderModalDateInput(job, field));
+
+  return wrap;
+}
+
+function renderModalDateInput(job, field) {
+  const value = job[field] || '';
+
+  if (value && !isValidISODate(value)) {
+    const box = document.createElement('div');
+    box.className = 'non-date-value';
+    const text = document.createElement('span');
+    text.className = 'raw-text';
+    text.textContent = value;
+    box.appendChild(text);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Replace with date';
+    btn.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'date';
+      input.addEventListener('change', () => {
+        saveField(job, field, input.value, input);
+      });
+      box.replaceWith(input);
+    });
+    box.appendChild(btn);
+    return box;
+  }
+
+  const input = document.createElement('input');
+  input.type = 'date';
+  input.value = value;
+  input.addEventListener('change', () => {
+    saveField(job, field, input.value, input);
+  });
+  return input;
+}
+
+function buildModalFollowupField(label, job, field) {
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-field';
+
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  wrap.appendChild(labelEl);
+
+  wrap.appendChild(renderModalFollowupField(job, field));
+
+  return wrap;
+}
+
+function renderModalFollowupField(job, field) {
+  const tokens = parseFollowupLog(job[field]);
+
+  const box = document.createElement('div');
+  box.className = 'followup-field';
+
+  for (const token of tokens) {
+    const chip = document.createElement('span');
+    chip.className = 'followup-chip' + (isValidISODate(token) ? '' : ' non-date');
+    const text = document.createElement('span');
+    text.textContent = token;
+    chip.appendChild(text);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.innerHTML = '&times;';
+    removeBtn.addEventListener('click', () => {
+      const updated = tokens.filter(t => t !== token);
+      const value = serializeFollowupLog(updated);
+      saveField(job, field, value, chip).then(() => {
+        const fresh = renderModalFollowupField(job, field);
+        box.replaceWith(fresh);
+      });
+    });
+    chip.appendChild(removeBtn);
+    box.appendChild(chip);
+  }
+
+  const addWrap = document.createElement('span');
+  addWrap.className = 'followup-add';
+  const dateInput = document.createElement('input');
+  dateInput.type = 'date';
+  addWrap.appendChild(dateInput);
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.textContent = 'Add';
+  addBtn.disabled = tokens.length >= 2;
+  addBtn.addEventListener('click', () => {
+    if (!dateInput.value || tokens.includes(dateInput.value)) return;
+    const updated = [...tokens, dateInput.value];
+    const value = serializeFollowupLog(updated);
+    saveField(job, field, value, addWrap).then(() => {
+      const fresh = renderModalFollowupField(job, field);
+      box.replaceWith(fresh);
+    });
+  });
+  addWrap.appendChild(addBtn);
+  box.appendChild(addWrap);
+
+  return box;
+}
+
+function buildModalStatusField(job) {
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-field';
+  const label = document.createElement('label');
+  label.textContent = 'Status';
+  wrap.appendChild(label);
+
+  const select = document.createElement('select');
+  for (const s of STATUS_VALUES) {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s || '(none)';
+    if (s === (job.status || '')) opt.selected = true;
+    select.appendChild(opt);
+  }
+  select.addEventListener('change', () => {
+    saveField(job, 'status', select.value, select).then(() => render());
+  });
+  wrap.appendChild(select);
+  return wrap;
+}
+
+function buildModalTextField(label, job, field, isNotes) {
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-field';
+
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  wrap.appendChild(labelEl);
+
+  const editable = document.createElement('div');
+  editable.className = 'editable';
+  editable.dataset.field = field;
+  editable.contentEditable = 'true';
+  editable.textContent = job[field] || '';
+  editable.addEventListener('blur', () => {
+    const value = editable.textContent.trim();
+    if (value !== (job[field] || '')) {
+      saveField(job, field, value, editable);
+    }
+  });
+  wrap.appendChild(editable);
+
+  return wrap;
+}
+
+async function saveField(job, field, value, cell) {
+  const res = await fetch('/api/jobs/update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      company: job.company,
+      date_added: job.date_added,
+      field,
+      value,
+    }),
+  });
+  if (res.ok) {
+    job[field] = value;
+    cell.classList.remove('saved-flash');
+    void cell.offsetWidth;
+    cell.classList.add('saved-flash');
+  } else {
+    alert('Failed to save change.');
+  }
+  return res.ok;
+}
+
+function addDropHandlers(body) {
+  body.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    body.classList.add('drag-over');
+  });
+  body.addEventListener('dragleave', () => body.classList.remove('drag-over'));
+  body.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    body.classList.remove('drag-over');
+    const key = e.dataTransfer.getData('text/plain');
+    const job = allJobs.find(j => rowKey(j) === key);
+    if (!job) return;
+    const newStatus = body.dataset.status;
+    if ((job.status || '') === newStatus) return;
+
+    const res = await fetch('/api/jobs/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company: job.company,
+        date_added: job.date_added,
+        field: 'status',
+        value: newStatus,
+      }),
+    });
+    if (res.ok) {
+      job.status = newStatus;
+      render();
+    } else {
+      alert('Failed to move card.');
+    }
+  });
+}
+
+document.getElementById('search').addEventListener('input', render);
+
+document.getElementById('modalBackdrop').addEventListener('click', (e) => {
+  if (e.target.id === 'modalBackdrop') closeModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeModal();
+});
+
+loadJobs();
+</script>
+</body>
+</html>

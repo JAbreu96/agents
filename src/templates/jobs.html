@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Job Tracker</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f8;
+    --card: #ffffff;
+    --border: #e2e2e6;
+    --text: #1d1d1f;
+    --muted: #6b6b74;
+    --accent: #3457d5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16161a;
+      --card: #1f1f24;
+      --border: #303038;
+      --text: #eaeaef;
+      --muted: #9a9aa5;
+      --accent: #6f8dff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  h1 { font-size: 18px; margin: 0; }
+  .stats { color: var(--muted); font-size: 13px; }
+  nav.view-nav { display: flex; gap: 4px; }
+  nav.view-nav a {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    text-decoration: none;
+    color: var(--muted);
+  }
+  nav.view-nav a.active { background: var(--accent); color: #fff; }
+  nav.view-nav a:not(.active):hover { background: var(--bg); }
+  .controls {
+    padding: 14px 28px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+  }
+  input[type="search"], select {
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card);
+    color: var(--text);
+    font-size: 13px;
+  }
+  input[type="search"] { flex: 1; min-width: 200px; }
+  button.linklike {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 7px 4px;
+  }
+  main { padding: 20px 28px 60px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 8px; overflow: hidden; }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg);
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    position: sticky;
+    top: 0;
+  }
+  tr.job-row { cursor: pointer; }
+  tr.job-row:hover { background: var(--bg); }
+  tr.detail-row td { background: var(--bg); cursor: default; }
+  tr.detail-row.collapsed { display: none; }
+  tr:last-child td, tr.detail-row:last-child td { border-bottom: none; }
+  a.company-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+  a.company-link:hover { text-decoration: underline; }
+  .caret {
+    display: inline-block;
+    width: 14px;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+    transform: rotate(-90deg);
+  }
+  tr.job-row.expanded .caret { transform: rotate(0deg); }
+  td.editable { cursor: text; min-width: 120px; }
+  td.editable:hover { outline: 1px dashed var(--accent); outline-offset: -2px; }
+  td.editable[contenteditable="true"] { outline: 2px solid var(--accent); outline-offset: -2px; }
+  select.status-select { width: 100%; font-size: 13px; }
+  .detail-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(160px, 1fr));
+    gap: 14px;
+    padding: 4px 0 12px;
+  }
+  .detail-field { display: flex; flex-direction: column; gap: 4px; }
+  .detail-field label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+  }
+  .detail-field .editable {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: var(--card);
+    min-height: 16px;
+  }
+  .detail-field.notes-field { grid-column: 1 / -1; }
+  .detail-field.notes-field .editable {
+    white-space: pre-wrap;
+    min-height: 80px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .saved-flash { animation: flash 0.6s ease; }
+  @keyframes flash { from { background: #d9f5df; } to { background: transparent; } }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+
+  .detail-field input[type="date"] {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 9px;
+    background: var(--card);
+    color: var(--text);
+    font-size: 13px;
+    width: 100%;
+  }
+  .non-date-value {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: var(--card);
+    font-size: 13px;
+  }
+  .non-date-value .raw-text { flex: 1; color: var(--text); }
+  .non-date-value button {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--accent);
+    font-size: 11px;
+    padding: 3px 7px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .non-date-value button:hover { background: var(--bg); }
+  .followup-field {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .followup-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px 6px 3px 10px;
+    font-size: 12px;
+  }
+  .followup-chip.non-date { color: var(--muted); font-style: italic; }
+  .followup-chip button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 999px;
+  }
+  .followup-chip button:hover { background: var(--bg); color: var(--text); }
+  .followup-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .followup-add input[type="date"] {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 6px;
+    background: var(--card);
+    color: var(--text);
+    font-size: 12px;
+  }
+  .followup-add button {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--accent);
+    font-size: 11px;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+  .followup-add button:hover { background: var(--bg); }
+  .followup-add button:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Job Tracker — local cache</h1>
+  <nav class="view-nav">
+    <a href="/" class="active">Table</a>
+    <a href="/kanban">Kanban</a>
+  </nav>
+  <div class="stats" id="stats"></div>
+</header>
+<div class="controls">
+  <input type="search" id="search" placeholder="Search company, title, notes…">
+  <select id="statusFilter">
+    <option value="">All statuses</option>
+    {% for s in status_values %}
+      {% if s %}<option value="{{ s }}">{{ s }}</option>{% endif %}
+    {% endfor %}
+    <option value="__blank__">(no status)</option>
+  </select>
+  <button class="linklike" id="expandAll">Expand all</button>
+  <button class="linklike" id="collapseAll">Collapse all</button>
+</div>
+<main>
+  <table id="jobsTable">
+    <thead>
+      <tr>
+        <th style="width:20px;"></th>
+        <th>Company</th>
+        <th>Title</th>
+        <th>Location</th>
+        <th>Date Added</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody id="jobsBody"></tbody>
+  </table>
+  <div class="empty" id="emptyState" style="display:none;">No jobs match your filters.</div>
+</main>
+
+<script>
+const STATUS_VALUES = {{ status_values | tojson }};
+let allJobs = [];
+
+async function loadJobs() {
+  const res = await fetch('/api/jobs');
+  allJobs = await res.json();
+  render();
+}
+
+function rowKey(job) {
+  return `${job.company}::${job.date_added}`;
+}
+
+function render() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const statusFilter = document.getElementById('statusFilter').value;
+
+  const filtered = allJobs.filter(j => {
+    if (statusFilter === '__blank__' && (j.status || '').trim() !== '') return false;
+    if (statusFilter && statusFilter !== '__blank__' && j.status !== statusFilter) return false;
+    if (!q) return true;
+    const haystack = [j.company, j.position_title, j.notes, j.location].join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
+
+  document.getElementById('stats').textContent = `${filtered.length} of ${allJobs.length} jobs`;
+  document.getElementById('emptyState').style.display = filtered.length ? 'none' : 'block';
+
+  const tbody = document.getElementById('jobsBody');
+  tbody.innerHTML = '';
+
+  for (const job of filtered) {
+    const key = rowKey(job);
+
+    const mainRow = document.createElement('tr');
+    mainRow.className = 'job-row';
+    mainRow.dataset.key = key;
+
+    const caretTd = document.createElement('td');
+    caretTd.innerHTML = '<span class="caret">▾</span>';
+    mainRow.appendChild(caretTd);
+
+    const companyTd = document.createElement('td');
+    if (job.link) {
+      const a = document.createElement('a');
+      a.href = job.link;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.className = 'company-link';
+      a.textContent = job.company;
+      a.addEventListener('click', (e) => e.stopPropagation());
+      companyTd.appendChild(a);
+    } else {
+      companyTd.textContent = job.company;
+    }
+    mainRow.appendChild(companyTd);
+
+    mainRow.appendChild(makeCell(job.position_title));
+    mainRow.appendChild(makeCell(job.location));
+    mainRow.appendChild(makeCell(job.date_added));
+
+    const statusTd = makeStatusCell(job);
+    statusTd.addEventListener('click', (e) => e.stopPropagation());
+    mainRow.appendChild(statusTd);
+
+    const detailRow = document.createElement('tr');
+    detailRow.className = 'detail-row collapsed';
+    detailRow.dataset.key = key;
+    const detailTd = document.createElement('td');
+    detailTd.colSpan = 6;
+    detailTd.appendChild(buildDetailGrid(job));
+    detailRow.appendChild(detailTd);
+
+    mainRow.addEventListener('click', () => toggleRow(mainRow, detailRow));
+
+    tbody.appendChild(mainRow);
+    tbody.appendChild(detailRow);
+  }
+}
+
+function toggleRow(mainRow, detailRow) {
+  const collapsed = detailRow.classList.toggle('collapsed');
+  mainRow.classList.toggle('expanded', !collapsed);
+}
+
+function buildDetailGrid(job) {
+  const grid = document.createElement('div');
+  grid.className = 'detail-grid';
+
+  grid.appendChild(makeDetailField('Contacts', job, 'contacts'));
+  grid.appendChild(makeDateField('Outreach Date', job, 'outreach_date'));
+  grid.appendChild(makeDateField('Date Applied', job, 'date_applied'));
+  grid.appendChild(makeFollowupField('Follow-up Log', job, 'followup_log'));
+  grid.appendChild(makeDetailField('Notes', job, 'notes', true));
+
+  return grid;
+}
+
+function isValidISODate(str) {
+  if (!str) return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
+  return !isNaN(Date.parse(str));
+}
+
+function parseFollowupLog(raw) {
+  return (raw || '').split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function serializeFollowupLog(tokens) {
+  return tokens.join(', ');
+}
+
+function makeDateField(label, job, field) {
+  const wrap = document.createElement('div');
+  wrap.className = 'detail-field';
+
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  wrap.appendChild(labelEl);
+
+  wrap.appendChild(renderDateInput(job, field));
+
+  return wrap;
+}
+
+function renderDateInput(job, field) {
+  const value = job[field] || '';
+
+  if (value && !isValidISODate(value)) {
+    const box = document.createElement('div');
+    box.className = 'non-date-value';
+    const text = document.createElement('span');
+    text.className = 'raw-text';
+    text.textContent = value;
+    box.appendChild(text);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Replace with date';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const input = document.createElement('input');
+      input.type = 'date';
+      input.addEventListener('click', (ev) => ev.stopPropagation());
+      input.addEventListener('change', () => {
+        saveField(job, field, input.value, input);
+      });
+      box.replaceWith(input);
+    });
+    box.appendChild(btn);
+    return box;
+  }
+
+  const input = document.createElement('input');
+  input.type = 'date';
+  input.value = value;
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('change', () => {
+    saveField(job, field, input.value, input);
+  });
+  return input;
+}
+
+function makeFollowupField(label, job, field) {
+  const wrap = document.createElement('div');
+  wrap.className = 'detail-field';
+
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  wrap.appendChild(labelEl);
+
+  wrap.appendChild(renderFollowupField(job, field, wrap));
+
+  return wrap;
+}
+
+function renderFollowupField(job, field, container) {
+  const tokens = parseFollowupLog(job[field]);
+
+  const box = document.createElement('div');
+  box.className = 'followup-field';
+
+  for (const token of tokens) {
+    const chip = document.createElement('span');
+    chip.className = 'followup-chip' + (isValidISODate(token) ? '' : ' non-date');
+    const text = document.createElement('span');
+    text.textContent = token;
+    chip.appendChild(text);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.innerHTML = '&times;';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const updated = tokens.filter(t => t !== token);
+      const value = serializeFollowupLog(updated);
+      saveField(job, field, value, chip).then(() => {
+        const fresh = renderFollowupField(job, field, container);
+        box.replaceWith(fresh);
+      });
+    });
+    chip.appendChild(removeBtn);
+    box.appendChild(chip);
+  }
+
+  const addWrap = document.createElement('span');
+  addWrap.className = 'followup-add';
+  const dateInput = document.createElement('input');
+  dateInput.type = 'date';
+  dateInput.addEventListener('click', (e) => e.stopPropagation());
+  addWrap.appendChild(dateInput);
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.textContent = 'Add';
+  addBtn.disabled = tokens.length >= 2;
+  addBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!dateInput.value || tokens.includes(dateInput.value)) return;
+    const updated = [...tokens, dateInput.value];
+    const value = serializeFollowupLog(updated);
+    saveField(job, field, value, addWrap).then(() => {
+      const fresh = renderFollowupField(job, field, container);
+      box.replaceWith(fresh);
+    });
+  });
+  addWrap.appendChild(addBtn);
+  box.appendChild(addWrap);
+
+  return box;
+}
+
+function makeDetailField(label, job, field, isNotes) {
+  const wrap = document.createElement('div');
+  wrap.className = 'detail-field' + (isNotes ? ' notes-field' : '');
+
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  wrap.appendChild(labelEl);
+
+  const editable = document.createElement('div');
+  editable.className = 'editable';
+  editable.contentEditable = 'true';
+  editable.textContent = job[field] || '';
+  editable.addEventListener('click', (e) => e.stopPropagation());
+  editable.addEventListener('blur', () => {
+    const value = editable.textContent.trim();
+    if (value !== (job[field] || '')) {
+      saveField(job, field, value, editable);
+    }
+  });
+  wrap.appendChild(editable);
+
+  return wrap;
+}
+
+function makeCell(text) {
+  const td = document.createElement('td');
+  td.textContent = text || '';
+  return td;
+}
+
+function makeStatusCell(job) {
+  const td = document.createElement('td');
+  const select = document.createElement('select');
+  select.className = 'status-select';
+  for (const s of STATUS_VALUES) {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s || '(none)';
+    if (s === (job.status || '')) opt.selected = true;
+    select.appendChild(opt);
+  }
+  select.addEventListener('change', () => saveField(job, 'status', select.value, td));
+  td.appendChild(select);
+  return td;
+}
+
+async function saveField(job, field, value, cell) {
+  const res = await fetch('/api/jobs/update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      company: job.company,
+      date_added: job.date_added,
+      field,
+      value,
+    }),
+  });
+  if (res.ok) {
+    job[field] = value;
+    cell.classList.remove('saved-flash');
+    void cell.offsetWidth;
+    cell.classList.add('saved-flash');
+  } else {
+    alert('Failed to save change.');
+  }
+}
+
+document.getElementById('search').addEventListener('input', render);
+document.getElementById('statusFilter').addEventListener('change', render);
+document.getElementById('expandAll').addEventListener('click', () => {
+  document.querySelectorAll('tr.detail-row').forEach(r => r.classList.remove('collapsed'));
+  document.querySelectorAll('tr.job-row').forEach(r => r.classList.add('expanded'));
+});
+document.getElementById('collapseAll').addEventListener('click', () => {
+  document.querySelectorAll('tr.detail-row').forEach(r => r.classList.add('collapsed'));
+  document.querySelectorAll('tr.job-row').forEach(r => r.classList.remove('expanded'));
+});
+
+loadJobs();
+</script>
+</body>
+</html>

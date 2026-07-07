@@ -1,13 +1,15 @@
 ---
 name: follow-up-reminder
-description: Scan the job tracker for applications with no status progression in 7+ days and send a follow-up nudge email. Run on a schedule or on-demand.
+description: Scan the job tracker for applications with no status progression in 7+ days, send a follow-up nudge email, and draft low-pressure follow-up emails for any outreach with no reply. Run on a schedule or on-demand.
 argument-hint: "[days=7]"
 ---
 
-Scan the job tracker for stale applications and send a follow-up reminder email to ajoelcrist@gmail.com.
+Scan the job tracker for stale applications and send a follow-up reminder email to ajoelcrist@gmail.com. For jobs where outreach was already sent, also draft a low-pressure follow-up email per contact.
 
 ## User info
 - **Email:** ajoelcrist@gmail.com
+- **Name:** Joelchrist Abreu
+- **Outreach email:** joelchristabreu4044@gmail.com
 
 ---
 
@@ -22,13 +24,55 @@ This returns jobs where:
 
 ---
 
-## Step 2 — Check outreach date for context
+## Step 2 — Split by outreach status
 
-For each job returned, note whether `outreach_date` is set. If outreach was sent, include that date in the email row so you know a contact was already reached.
+For each job returned, check whether `outreach_date` is set:
+
+- **Has outreach** (`outreach_date` is set): note the contact info from the `contacts` field (may include name and/or email). These will get a drafted follow-up email in Step 3.
+- **No outreach** (`outreach_date` is blank): flag these for the reminder email only.
 
 ---
 
-## Step 3 — Compose the reminder email
+## Step 3 — Draft follow-up emails for outreach with no reply
+
+For each job in the "has outreach" group, draft a short, low-pressure follow-up email.
+
+### Parsing contact info
+The `contacts` field may be a name, a name + email (e.g. `Jane Doe <jane@company.com>`), or just an email. Extract whatever is available. If no email is present, skip drafting for that job and note it in the final report.
+
+### Email template
+
+Keep it under 80 words. Warm, casual, zero pressure — this is a "just circling back" nudge, not a sales pitch.
+
+```
+Subject: Re: Quick intro — Joelchrist
+
+Hi [contact first name],
+
+Just wanted to follow up on my earlier note. If you ever have a few minutes to connect about [Company] and what you're working on, I'd love to chat.
+
+Hope things are going well!
+
+Joelchrist
+joelchristabreu4044@gmail.com
+linkedin.com/in/jc-abreu
+```
+
+- Personalize `[Company]` with the actual company name.
+- If a role was noted, you can optionally reference it naturally (e.g. "the [Role] role at [Company]") but keep it light.
+- Do NOT mention job hunting, referrals, or urgency.
+- Do NOT mention Meta or any employer in the subject line.
+
+### Saving drafts
+
+For each contact with a valid email, call `mcp__gmail_personal__draft_email` with:
+- `to`: contact's email address
+- `subject`: `Re: Quick intro — Joelchrist`
+- `body`: the follow-up email from the template above
+
+---
+
+## Step 4 — Compose the reminder email
 
 ```
 Subject: Follow-Up Reminder — [X] Applications Need Attention ([Today's Date])
@@ -46,6 +90,13 @@ APPLICATIONS NEEDING FOLLOW-UP
 
 ──────────────────────────────
 
+[If any outreach follow-ups were drafted:]
+Follow-up drafts created for: [Company1], [Company2], ...
+Check your Gmail drafts (joelchristabreu4044@gmail.com) to review and send.
+
+[If no outreach follow-ups:]
+No outreach follow-ups were needed.
+
 Consider sending a follow-up note to your contact or checking the company's applicant portal.
 
 [If no jobs found:]
@@ -57,20 +108,21 @@ Claude
 
 ---
 
-## Step 4 — Send the email
+## Step 5 — Send the reminder email
 
 Use `mcp__gmail_personal__send_email` with:
 - `to`: `ajoelcrist@gmail.com`
 - `subject`: `Follow-Up Reminder — [X] Applications Need Attention ([Today's Date])`
-- `body`: the email from Step 3
+- `body`: the email from Step 4
 
 Skip sending if no stale jobs were found — just report back that everything is current.
 
 ---
 
-## Step 5 — Confirm
+## Step 6 — Confirm
 
 Report back:
 - How many stale applications were found
 - Which companies were listed
+- How many follow-up drafts were created (and for which companies)
 - Whether the reminder email was sent

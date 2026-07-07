@@ -2,6 +2,11 @@
 
 Claude Code skills and MCP servers for job search automation — tracking postings, reviewing resumes, drafting outreach emails, and sending digests.
 
+> **Works alongside [`career-ops`](https://github.com/JAbreu96/career-ops)** (cloned at `../career-ops`).
+> career-ops is the **front of the funnel** — job discovery/scan, A–F evaluation, ATS CV tailoring, company research, and interview prep — and its `data/applications.md` is the **source of truth** for tracking.
+> This repo is the **cloud comms layer**: use it only for **Hunter.io contact lookup** (`job-tracker`), **Gmail draft outreach** (`outreach-email`), and **Gmail inbound scanning** (`application-digest`). The full division of labor lives in `career-ops/modes/_custom.md`.
+> Note: `job-tracker` writes contacts to the Google Sheet, so copy them into the matching `applications.md` row. Sheet-centric skills (`follow-up-reminder`, `job-digest`, `archive-jobs`) are secondary here — prefer career-ops's `followup`/`tracker`/`patterns` to avoid drift.
+
 ---
 
 ## Skills

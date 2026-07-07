@@ -21,3 +21,6 @@ htmlcov/
 
 # Claude
 .claude/settings.local.json
+
+# Local data cache (contains personal/contact info)
+data/
