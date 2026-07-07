@@ -135,6 +135,7 @@ def add_job(
     title: str,
     link: str,
     summary: str = "",
+    location: str = "",
     contacts: str = "",
     notes: str = "",
     status: str = "Tracking",
@@ -143,7 +144,7 @@ def add_job(
     """
     Add a new job to the tracker. Appends a row to Sheet1 with the correct column layout.
     - company, title, link: required
-    - summary, contacts, notes: optional free-text fields
+    - summary, location, contacts, notes: optional free-text fields
     - status: defaults to 'Tracking'; must be one of the valid status values
     - date_added: YYYY-MM-DD; defaults to today
     """
@@ -155,6 +156,7 @@ def add_job(
         title=title,
         link=link,
         summary=summary,
+        location=location,
         contacts=contacts,
         notes=notes,
         status=status,

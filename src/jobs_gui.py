@@ -9,8 +9,13 @@ Then open http://127.0.0.1:5151 in your browser.
 
 import os
 import sqlite3
+import sys
 
 from flask import Flask, g, jsonify, render_template, request
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from mcp_servers.job_tracker import sheet as sheet_client  # noqa: E402
+from src.jobs_db import upsert_job  # noqa: E402
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "jobs.db")
 
@@ -53,6 +58,54 @@ def api_jobs():
     db = get_db()
     rows = db.execute("SELECT * FROM jobs ORDER BY date_added DESC").fetchall()
     return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/jobs/add", methods=["POST"])
+def api_add_job():
+    payload = request.get_json(force=True)
+    company = (payload.get("company") or "").strip()
+    title = (payload.get("position_title") or "").strip()
+    link = (payload.get("link") or "").strip()
+    location = (payload.get("location") or "").strip()
+    summary = (payload.get("job_summary") or "").strip()
+    contacts = (payload.get("contacts") or "").strip()
+    notes = (payload.get("notes") or "").strip()
+    status = (payload.get("status") or "Tracking").strip()
+    date_added = (payload.get("date_added") or "").strip()
+
+    if not company or not title:
+        return jsonify({"error": "company and position_title are required"}), 400
+    if status and status not in STATUS_VALUES:
+        return jsonify({"error": f"status '{status}' is not a recognized value"}), 400
+
+    row = sheet_client.add_job(
+        company=company,
+        title=title,
+        link=link,
+        summary=summary,
+        location=location,
+        contacts=contacts,
+        notes=notes,
+        status=status or "Tracking",
+        date_added=date_added,
+    )
+
+    job = {
+        "company": row["company"],
+        "position_title": row["title"],
+        "job_summary": summary,
+        "location": location,
+        "link": row["link"],
+        "date_added": row["date_added"],
+        "contacts": contacts,
+        "notes": notes,
+        "outreach_date": "",
+        "date_applied": "",
+        "status": row["status"],
+        "followup_log": "",
+    }
+    upsert_job(job)
+    return jsonify(job)
 
 
 @app.route("/api/jobs/update", methods=["POST"])

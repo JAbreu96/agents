@@ -298,6 +298,27 @@
   }
   .followup-add button:hover { background: var(--card); }
   .followup-add button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  button.primary {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.primary:hover { opacity: 0.9; }
+  .modal-field input[type="text"] {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+  }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  .modal-error { color: #d64545; font-size: 12px; margin-bottom: 10px; display: none; }
 </style>
 </head>
 <body>
@@ -311,6 +332,7 @@
 </header>
 <div class="controls">
   <input type="search" id="search" placeholder="Search company, title, notes…">
+  <button class="primary" id="addJobBtn">+ Add Job</button>
 </div>
 <main>
   <div class="board" id="board"></div>
@@ -725,6 +747,149 @@ function addDropHandlers(body) {
     }
   });
 }
+
+function openAddJobModal() {
+  const backdrop = document.getElementById('modalBackdrop');
+  const panel = document.getElementById('modalPanel');
+  panel.innerHTML = '';
+  panel.appendChild(buildAddJobModalContent());
+  backdrop.classList.remove('hidden');
+  document.getElementById('addCompany').focus();
+}
+
+function buildAddJobModalContent() {
+  const frag = document.createDocumentFragment();
+
+  const head = document.createElement('div');
+  head.className = 'modal-head';
+  const h2 = document.createElement('h2');
+  h2.textContent = 'Add Job';
+  head.appendChild(h2);
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'modal-close';
+  closeBtn.innerHTML = '&times;';
+  closeBtn.addEventListener('click', closeModal);
+  head.appendChild(closeBtn);
+  frag.appendChild(head);
+
+  const errorEl = document.createElement('div');
+  errorEl.className = 'modal-error';
+  errorEl.id = 'addJobError';
+  frag.appendChild(errorEl);
+
+  const fields = [
+    { id: 'addCompany', label: 'Company *' },
+    { id: 'addTitle', label: 'Position Title *' },
+    { id: 'addLocation', label: 'Location' },
+    { id: 'addLink', label: 'Link' },
+    { id: 'addContacts', label: 'Contacts' },
+  ];
+  for (const f of fields) {
+    const wrap = document.createElement('div');
+    wrap.className = 'modal-field';
+    const label = document.createElement('label');
+    label.textContent = f.label;
+    wrap.appendChild(label);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = f.id;
+    wrap.appendChild(input);
+    frag.appendChild(wrap);
+  }
+
+  const statusWrap = document.createElement('div');
+  statusWrap.className = 'modal-field';
+  const statusLabel = document.createElement('label');
+  statusLabel.textContent = 'Status';
+  statusWrap.appendChild(statusLabel);
+  const select = document.createElement('select');
+  select.id = 'addStatus';
+  for (const s of STATUS_VALUES) {
+    if (!s) continue;
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    if (s === 'Tracking') opt.selected = true;
+    select.appendChild(opt);
+  }
+  statusWrap.appendChild(select);
+  frag.appendChild(statusWrap);
+
+  for (const f of [{ id: 'addSummary', label: 'Job Summary' }, { id: 'addNotes', label: 'Notes' }]) {
+    const wrap = document.createElement('div');
+    wrap.className = 'modal-field';
+    const label = document.createElement('label');
+    label.textContent = f.label;
+    wrap.appendChild(label);
+    const editable = document.createElement('div');
+    editable.className = 'editable';
+    editable.id = f.id;
+    editable.contentEditable = 'true';
+    wrap.appendChild(editable);
+    frag.appendChild(wrap);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'modal-actions';
+  const submitBtn = document.createElement('button');
+  submitBtn.className = 'primary';
+  submitBtn.textContent = 'Add Job';
+  submitBtn.addEventListener('click', () => submitAddJob(submitBtn));
+  actions.appendChild(submitBtn);
+  frag.appendChild(actions);
+
+  return frag;
+}
+
+async function submitAddJob(submitBtn) {
+  const errorEl = document.getElementById('addJobError');
+  errorEl.style.display = 'none';
+
+  const company = document.getElementById('addCompany').value.trim();
+  const position_title = document.getElementById('addTitle').value.trim();
+
+  if (!company || !position_title) {
+    errorEl.textContent = 'Company and Position Title are required.';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  const payload = {
+    company,
+    position_title,
+    location: document.getElementById('addLocation').value.trim(),
+    link: document.getElementById('addLink').value.trim(),
+    status: document.getElementById('addStatus').value,
+    contacts: document.getElementById('addContacts').value.trim(),
+    job_summary: document.getElementById('addSummary').textContent.trim(),
+    notes: document.getElementById('addNotes').textContent.trim(),
+  };
+
+  submitBtn.disabled = true;
+  try {
+    const res = await fetch('/api/jobs/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = data.error || 'Failed to add job.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    allJobs.unshift(data);
+    render();
+    closeModal();
+  } catch (err) {
+    errorEl.textContent = 'Failed to add job — check the server logs.';
+    errorEl.style.display = 'block';
+  } finally {
+    submitBtn.disabled = false;
+  }
+}
+
+document.getElementById('addJobBtn').addEventListener('click', openAddJobModal);
 
 document.getElementById('search').addEventListener('input', render);
 

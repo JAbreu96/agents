@@ -71,6 +71,7 @@ def _row_to_dict(row: list, row_index: int) -> dict:
         "company": cell(COL_COMPANY),
         "title": cell(COL_TITLE),
         "summary": cell(COL_SUMMARY),
+        "location": cell(COL_LOCATION),
         "link": cell(COL_LINK),
         "date_added": cell(COL_DATE_ADDED),
         "contacts": cell(COL_CONTACTS),
@@ -97,6 +98,7 @@ def add_job(
     title: str,
     link: str,
     summary: str = "",
+    location: str = "",
     contacts: str = "",
     notes: str = "",
     status: str = "Tracking",
@@ -109,7 +111,7 @@ def add_job(
     row[COL_COMPANY] = company.strip()
     row[COL_TITLE] = title.strip()
     row[COL_SUMMARY] = summary.strip()
-    row[COL_LOCATION] = ""
+    row[COL_LOCATION] = location.strip()
     row[COL_LINK] = link.strip()
     row[COL_DATE_ADDED] = date_str
     row[COL_CONTACTS] = contacts.strip()
