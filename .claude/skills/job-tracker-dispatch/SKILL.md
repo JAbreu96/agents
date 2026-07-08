@@ -247,9 +247,38 @@ Confirm Company, Title, Link, and Date match expectations. If any field is blank
 
 ---
 
+## Step 8 — Sync to local SQLite cache
+
+This skill writes directly to the sheet via the browser, bypassing the `job_tracker` MCP server, so nothing keeps the local SQLite cache (`data/jobs.db`, used by the job-tracker GUI) in sync. Upsert the same row manually:
+
+```python
+import sys
+sys.path.insert(0, '/Users/joelchristabreu/Documents/projects/agents')
+from src.jobs_db import upsert_job
+
+upsert_job({
+    "company": "COMPANY",
+    "position_title": "JOB_TITLE",
+    "job_summary": "JOB_SUMMARY",
+    "location": "LOCATION",
+    "link": "JOB_URL",
+    "date_added": "YYYY-MM-DD",
+    "contacts": "CONTACTS",
+    "notes": "NOTES",
+    "outreach_date": "",
+    "date_applied": "",
+    "status": "",
+    "followup_log": "",
+})
+print("SQLite synced.")
+```
+
+---
+
 ## Final report
 
 State:
 - Job title and company
 - **Added** (row N) or **Updated** (existing row N)
+- Whether the local SQLite cache was synced
 - Any fields that failed and why

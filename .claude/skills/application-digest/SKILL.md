@@ -72,6 +72,25 @@ Skip companies labeled `Unknown / New` — no tracker row to update.
 
 ---
 
+## Step 3c — Sync status to local SQLite cache
+
+`mcp__job_tracker__update_job_status` only writes to the Google Sheet. For each company updated in Step 3b, also update the local SQLite cache (`data/jobs.db`) so the job-tracker GUI reflects the new status immediately:
+
+```python
+import sys
+sys.path.insert(0, '/Users/joelchristabreu/Documents/projects/agents')
+from src.jobs_db import get_job, upsert_job
+
+job = get_job("{Company}")
+if job:
+    job["status"] = "{New Status}"
+    upsert_job(job)
+```
+
+If `get_job` returns `None`, the local cache doesn't have this company yet — skip silently (it'll pick it up on the next full sync).
+
+---
+
 ## Step 4 — Compose the digest
 
 Write a clean digest email. Format:

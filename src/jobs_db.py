@@ -5,7 +5,7 @@ Sync the DB first:
     python scripts/sync_jobs_to_sqlite.py
 
 Usage:
-    from src.jobs_db import get_job, get_followup_log, update_followup_log
+    from src.jobs_db import get_job, get_followup_log, update_followup_log, upsert_job, delete_job
 """
 
 import os
@@ -148,6 +148,22 @@ def upsert_job(item: dict) -> None:
             vals
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_job(company: str) -> int:
+    """
+    Removes all rows for a company from the local SQLite cache (e.g. after archiving).
+    Returns the number of rows deleted. Silently no-ops if the DB file doesn't exist.
+    """
+    conn = _connect()
+    if not conn:
+        return 0
+    try:
+        cur = conn.execute("DELETE FROM jobs WHERE LOWER(company) = LOWER(?)", (company,))
+        conn.commit()
+        return cur.rowcount
     finally:
         conn.close()
 

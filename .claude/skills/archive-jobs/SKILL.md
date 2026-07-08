@@ -23,7 +23,25 @@ The tool will:
 
 ---
 
-## Step 2 — Send summary email
+## Step 2 — Remove archived jobs from the local SQLite cache
+
+The tool only touches the Google Sheet — the local SQLite cache (`data/jobs.db`, used by the job-tracker GUI) still has rows for the companies just archived. Delete them so the GUI doesn't show stale/archived jobs as active.
+
+For each company returned in Step 1:
+
+```python
+import sys
+sys.path.insert(0, '/Users/joelchristabreu/Documents/projects/agents')
+from src.jobs_db import delete_job
+
+for company in archived_companies:  # from Step 1's response
+    deleted = delete_job(company)
+    print(f"{company}: {deleted} row(s) removed from SQLite cache")
+```
+
+---
+
+## Step 3 — Send summary email
 
 Use `mcp__gmail_personal__send_email` with:
 - `to`: `ajoelcrist@gmail.com`
@@ -54,9 +72,10 @@ Claude
 
 ---
 
-## Step 3 — Confirm
+## Step 4 — Confirm
 
 Report back:
 - How many jobs were archived
 - Which companies were moved
+- How many were removed from the local SQLite cache
 - Whether the summary email was sent
