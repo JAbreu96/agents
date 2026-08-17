@@ -1,15 +1,10 @@
 ---
 name: job-tracker
-description: Track a job posting — fetch a job URL, extract job details (title, company, location, summary), and log it to the Google Sheets job tracker. Use when the user provides a job posting URL and wants to save it to their tracker.
+description: Track a job posting — fetch a job URL, extract job details (title, company, location, summary), and log it to the local job tracker DB. Use when the user provides a job posting URL and wants to save it to their tracker.
 argument-hint: [job-posting-url]
 ---
 
 Track the job posting at `$ARGUMENTS` by following these steps:
-
-## Spreadsheet info
-- Spreadsheet ID: `1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q`
-- Worksheet: `Sheet1`
-- Column layout (1-based): A=Company, B=Position Title, C=Job Summary, D=Location, E=Link, F=Date Added, G=Contacts, H=Notes, I=Outreach Date, J=Date Applied, K=Status
 
 ---
 
@@ -60,7 +55,7 @@ with sync_playwright() as p:
 print(text)
 ```
 
-Use the full `text` output as the raw content for Step 2 extraction.
+Use the full `text` output as the raw content for Step 2 extraction. Save the complete, unedited raw content (whatever was fetched — API response text, WebFetch output, or Playwright `text`) as `RAW_JOB_DESCRIPTION` — it gets appended in full to the tracker notes in Step 5, so nothing gets lost to summarization.
 
 ---
 
@@ -146,7 +141,7 @@ Gaps: [gap1], [gap2], [gap3]
 ```
 (Leave a blank line after the gaps so the research notes from Step 3 are visually separated.)
 
-Save this as `MATCH_BLOCK` — it will be written to column H in Step 6.
+Save this as `MATCH_BLOCK` — it will be included in the tracker notes in Step 5.
 
 ### Threshold gate
 
@@ -160,7 +155,7 @@ Instead, report:
 >
 > This job fell below the 65/100 tracking threshold. Add it anyway?
 
-Wait for the user to confirm before continuing. If they confirm, proceed to Step 6. If they decline or don't respond, stop.
+Wait for the user to confirm before continuing. If they confirm, proceed to Step 5. If they decline or don't respond, stop.
 
 **Exception — always flag, never auto-skip:**
 If a hard location mismatch is detected (role requires relocation to another country, or is international with no remote option), add a 🌍 flag to the report above regardless of score:
@@ -168,118 +163,40 @@ If a hard location mismatch is detected (role requires relocation to another cou
 
 ---
 
-## Step 5 — Check for duplicates and find next empty row
+## Step 5 — Add to the tracker
 
-Use the `gsheets` MCP tool to read the full sheet (`Sheet1!A:I`) to:
+Call `mcp__job_tracker__add_job` with:
+- `company`, `title`, `link`, `location` — from Step 2
+- `summary` — the full Step 2 summary
+- `notes` — `MATCH_BLOCK` (Step 4) combined with the research notes from Step 3 and the full raw job description from Step 1, in that order:
+  ```
+  Match Score: X/100 — [rationale]
+  Gaps: [gap1], [gap2], [gap3]
 
-1. **Check for duplicates** — scan column E for the job URL.
-   - **If found at row N**: update columns A–E and G–H at that row. **Never touch column F (Date Added) or I (Outreach Date).** Report that the job was updated, not added. Stop here.
+  [Research notes from Step 3]
 
-2. **Find the next empty row** — scan column A from row 2 downward and find the first row where column A is empty. Call this row N.
+  ====
 
----
+  [RAW_JOB_DESCRIPTION from Step 1 — the complete, unedited posting text]
+  ```
+- `status`: `Tracking`
 
-## Step 6 — Write to the sheet
+The tool handles duplicate detection itself (matches on `link`): if a job with the same link already exists, it updates that entry in place (preserving its original `date_added`, `outreach_date`, `date_applied`, and `status`) instead of creating a new row. Use the tool's `updated` field in its response to know which happened — report it accordingly in Step 6.
 
-Use `sheets_update_values` to write to row N (the first empty row found in Step 6):
-
-| A | B | C | D | E | F | G | H | I |
-|---|---|---|---|---|---|---|---|---|
-| Company | Position Title | Job Summary | Location | Link | Date Added (YYYY-MM-DD) | Contacts | Notes | _(leave blank)_ |
-
-For column H (Notes), combine `MATCH_BLOCK` with the research notes from Step 3:
-```
-Match Score: X/100 — [rationale]
-Gaps: [gap1], [gap2], [gap3]
-
-[Research notes from Step 3]
-```
-
-Use range `Sheet1!A{N}:I{N}`.
-
-**If no empty row exists within the current range** (the sheet is full): use `sheets_append_values` with `insertDataOption: INSERT_ROWS` to add a new row beyond the current range.
+Note: entries are keyed by `(company, date_added, position_title, link)`, so distinct postings — including several requisitions a company lists under one title — each get their own row. Re-adding the same posting URL overwrites in place.
 
 ---
 
-## Step 7 — Sync to local SQLite cache
-
-After writing to the sheet, immediately upsert the same row into the local SQLite DB so lookups stay fast and in sync.
-
-```python
-import sys
-sys.path.insert(0, '/Users/joelchristabreu/Documents/projects/agents')
-from src.jobs_db import upsert_job
-
-upsert_job({
-    "company": "{Company}",
-    "position_title": "{Position Title}",
-    "job_summary": "{Job Summary}",
-    "location": "{Location}",
-    "link": "{Link}",
-    "date_added": "{Date Added}",
-    "contacts": "{Contacts}",
-    "notes": "{Notes}",
-    "outreach_date": "",
-    "date_applied": "",
-    "status": "",
-    "followup_log": "",
-})
-print("SQLite synced.")
-```
-
-Replace each `{placeholder}` with the actual value written to the sheet in Step 6.
-
----
-
-## Step 8 — Set row height
-
-After writing, cap the new row's height to 21px using the Google Sheets API via Python/Bash:
-
-```python
-import json, urllib.request
-from google.oauth2 import service_account
-import google.auth.transport.requests
-
-SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-SPREADSHEET_ID = "1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q"
-SHEET_ID = 138342806  # Sheet1
-ROW_N = {N}  # replace with the actual 1-based row number written in Step 7
-
-creds = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE,
-    scopes=["https://www.googleapis.com/auth/spreadsheets"]
-)
-creds.refresh(google.auth.transport.requests.Request())
-
-body = {"requests": [{"updateDimensionProperties": {
-    "range": {"sheetId": SHEET_ID, "dimension": "ROWS",
-              "startIndex": ROW_N - 1, "endIndex": ROW_N},
-    "properties": {"pixelSize": 21},
-    "fields": "pixelSize"
-}}]}
-
-req = urllib.request.Request(
-    f"https://sheets.googleapis.com/v4/spreadsheets/{SPREADSHEET_ID}:batchUpdate",
-    data=json.dumps(body).encode(),
-    headers={"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"},
-    method="POST"
-)
-urllib.request.urlopen(req)
-```
-
----
-
-## Step 9 — Report result
+## Step 6 — Report result
 
 State:
 - Job title and company
-- Whether it was **newly added** or **updated** (duplicate URL)
-- Row it was written to (if available)
+- Whether it was **newly added** or **updated** (duplicate link, per Step 5's `updated` field)
 - Match score and top 3 gaps from Step 4
 
 ---
 
-## Step 10 — Offer tailored resume (if good fit)
+## Step 7 — Offer tailored resume (if good fit)
 
 If the match score from Step 4 is **65/100 or above**, ask the user:
 
@@ -293,7 +210,7 @@ Wait for their response. If they say yes, create a tailored resume copy by runni
 If they say no (or don't respond), stop here.
 
 Follow the resume-review skill exactly:
-1. Run recruiter analysis (match score + gaps) — you already have this from Step 5, so skip to rewrites
+1. Run recruiter analysis (match score + gaps) — you already have this from Step 4, so skip to rewrites
 2. Rewrite the experience section (XYZ formula, incorporate missing keywords honestly)
 3. ATS + hiring manager scan
 4. Final summary with revised score

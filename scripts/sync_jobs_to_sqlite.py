@@ -17,6 +17,9 @@ warnings.filterwarnings("ignore")
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from src import jobs_db  # noqa: E402
+
 SPREADSHEET_ID = "1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q"
 SHEET_RANGE = "Sheet1!A2:L"
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "jobs.db")
@@ -46,24 +49,9 @@ def get_sheet_rows():
 
 
 def init_db(conn):
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS jobs (
-            company       TEXT NOT NULL,
-            date_added    TEXT NOT NULL DEFAULT '',
-            position_title TEXT,
-            job_summary   TEXT,
-            location      TEXT,
-            link          TEXT,
-            contacts      TEXT,
-            notes         TEXT,
-            outreach_date TEXT,
-            date_applied  TEXT,
-            status        TEXT,
-            followup_log  TEXT,
-            PRIMARY KEY (company, date_added)
-        )
-    """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_company ON jobs (company)")
+    # Schema (and the (company, date_added, position_title) key) is owned by
+    # src.jobs_db so every write path agrees on what identifies a row.
+    jobs_db._ensure_schema(conn)
     conn.commit()
 
 

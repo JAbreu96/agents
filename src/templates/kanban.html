@@ -43,6 +43,8 @@
   }
   h1 { font-size: 18px; margin: 0; }
   .stats { color: var(--muted); font-size: 13px; }
+  .goal-badge { color: var(--muted); font-size: 13px; }
+  .goal-badge.goal-met { color: #2e9e4f; font-weight: 600; }
   nav.view-nav { display: flex; gap: 4px; }
   nav.view-nav a {
     padding: 6px 12px;
@@ -60,16 +62,20 @@
     flex-wrap: wrap;
     border-bottom: 1px solid var(--border);
   }
-  input[type="search"] {
+  input[type="search"], input[type="date"] {
     padding: 7px 10px;
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--card);
     color: var(--text);
     font-size: 13px;
+  }
+  input[type="search"] {
     flex: 1;
     min-width: 200px;
   }
+  .date-filter { display: flex; align-items: center; gap: 6px; }
+  .date-filter span { color: var(--muted); font-size: 13px; }
   main {
     padding: 20px 28px 40px;
     overflow-x: auto;
@@ -167,14 +173,30 @@
     margin-bottom: 14px;
   }
   .modal-head h2 { font-size: 16px; margin: 0 0 2px; }
-  .modal-head a.company-link {
-    color: var(--accent);
-    text-decoration: none;
-    font-weight: 700;
+  .company-row { display: flex; align-items: center; gap: 6px; }
+  .company-editable {
     font-size: 16px;
+    font-weight: 700;
+    margin: 0;
+    cursor: text;
+    padding: 2px 4px;
+    border-radius: 4px;
   }
-  .modal-head a.company-link:hover { text-decoration: underline; }
+  .company-editable:hover { outline: 1px dashed var(--accent); }
+  .company-editable:focus { outline: 2px solid var(--accent); }
+  a.company-link-icon { color: var(--accent); text-decoration: none; font-size: 14px; }
+  a.company-link-icon:hover { text-decoration: underline; }
   .modal-subtitle { color: var(--muted); font-size: 12px; }
+  .delete-job-btn {
+    background: none;
+    border: 1px solid #d9534f;
+    color: #d9534f;
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .delete-job-btn:hover { background: #d9534f; color: #fff; }
   .modal-close {
     background: none;
     border: none;
@@ -202,7 +224,7 @@
     font-size: 13px;
     min-height: 16px;
   }
-  .modal-field .editable[data-field="notes"] {
+  .modal-field .editable[data-field="notes"], .modal-field .editable[data-field="job_summary"] {
     white-space: pre-wrap;
     min-height: 90px;
     max-height: 260px;
@@ -214,6 +236,37 @@
   }
   .saved-flash { animation: flash 0.6s ease; }
   @keyframes flash { from { background: #d9f5df; } to { background: var(--bg); } }
+  .markdown-field-header { display: flex; justify-content: space-between; align-items: center; }
+  .markdown-rendered { white-space: normal; line-height: 1.4; }
+  .markdown-rendered p { margin: 0 0 8px; }
+  .markdown-rendered p:last-child { margin-bottom: 0; }
+  .markdown-rendered ul { margin: 0 0 8px; padding-left: 20px; }
+  .markdown-rendered h4 { margin: 10px 0 4px; font-size: 13px; }
+  .markdown-rendered code { background: rgba(127,127,127,0.15); padding: 1px 4px; border-radius: 3px; }
+  .modal-field .editable.markdown-rendered:not(.expanded) {
+    max-height: 4.2em;
+    overflow: hidden;
+    position: relative;
+  }
+  .modal-field .editable.markdown-rendered:not(.expanded)::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 1.4em;
+    background: linear-gradient(to bottom, transparent, var(--bg));
+  }
+  .markdown-expand-btn { align-self: flex-start; padding-left: 0; }
+  textarea.markdown-raw {
+    width: 100%;
+    font-family: inherit;
+    font-size: 13px;
+    resize: vertical;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: var(--bg);
+    color: var(--text);
+  }
 
   .modal-field input[type="date"] {
     border: 1px solid var(--border);
@@ -309,6 +362,14 @@
     cursor: pointer;
   }
   button.primary:hover { opacity: 0.9; }
+  button.linklike {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 7px 4px;
+  }
   .modal-field input[type="text"] {
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -329,9 +390,19 @@
     <a href="/kanban" class="active">Kanban</a>
   </nav>
   <div class="stats" id="stats"></div>
+  <div class="goal-badge" id="goalBadge"></div>
 </header>
 <div class="controls">
   <input type="search" id="search" placeholder="Search company, title, notes…">
+  <div class="date-filter">
+    <input type="date" id="dateFrom" title="Added from">
+    <span>–</span>
+    <input type="date" id="dateTo" title="Added to">
+    <button class="linklike" id="filterToday">Today</button>
+    <button class="linklike" id="filterWeek">This Week</button>
+    <button class="linklike" id="filterClearDates">Clear</button>
+  </div>
+  <button class="linklike" id="exportCsvBtn">Export CSV</button>
   <button class="primary" id="addJobBtn">+ Add Job</button>
 </div>
 <main>
@@ -357,18 +428,131 @@ async function loadJobs() {
 }
 
 function rowKey(job) {
-  return `${job.company}::${job.date_added}`;
+  return `${job.company}::${job.date_added}::${job.position_title || ''}::${job.link || ''}`;
+}
+
+function localISODate(d) {
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return `${yr}-${mo}-${da}`;
+}
+
+function startOfWeekISO(d) {
+  const copy = new Date(d);
+  copy.setDate(copy.getDate() - copy.getDay());
+  return localISODate(copy);
+}
+
+function renderMarkdownInto(container, raw) {
+  container.innerHTML = '';
+  const lines = (raw || '').split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^\s*$/.test(line)) { i++; continue; }
+    const heading = /^#{1,6}\s+(.*)$/.exec(line);
+    if (heading) {
+      const h = document.createElement('h4');
+      appendInlineMarkdown(h, heading[1]);
+      container.appendChild(h);
+      i++;
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      const ul = document.createElement('ul');
+      while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
+        const li = document.createElement('li');
+        appendInlineMarkdown(li, lines[i].replace(/^[-*]\s+/, ''));
+        ul.appendChild(li);
+        i++;
+      }
+      container.appendChild(ul);
+      continue;
+    }
+    const para = document.createElement('p');
+    let first = true;
+    while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^[-*]\s+/.test(lines[i]) && !/^#{1,6}\s+/.test(lines[i])) {
+      if (!first) para.appendChild(document.createElement('br'));
+      appendInlineMarkdown(para, lines[i]);
+      first = false;
+      i++;
+    }
+    container.appendChild(para);
+  }
+  if (!container.childNodes.length) {
+    const empty = document.createElement('p');
+    empty.className = 'markdown-empty';
+    empty.textContent = '(empty)';
+    container.appendChild(empty);
+  }
+}
+
+function appendInlineMarkdown(parent, text) {
+  const tokenRe = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+  let lastIndex = 0;
+  let m;
+  while ((m = tokenRe.exec(text)) !== null) {
+    if (m.index > lastIndex) parent.appendChild(document.createTextNode(text.slice(lastIndex, m.index)));
+    const token = m[0];
+    if (token.startsWith('**')) {
+      const strong = document.createElement('strong');
+      strong.textContent = token.slice(2, -2);
+      parent.appendChild(strong);
+    } else if (token.startsWith('`')) {
+      const code = document.createElement('code');
+      code.textContent = token.slice(1, -1);
+      parent.appendChild(code);
+    } else {
+      const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
+      if (linkMatch && /^https?:\/\//i.test(linkMatch[2])) {
+        const a = document.createElement('a');
+        a.href = linkMatch[2];
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = linkMatch[1];
+        parent.appendChild(a);
+      } else {
+        parent.appendChild(document.createTextNode(token));
+      }
+    }
+    lastIndex = tokenRe.lastIndex;
+  }
+  if (lastIndex < text.length) parent.appendChild(document.createTextNode(text.slice(lastIndex)));
+}
+
+function checkMarkdownOverflow(rendered, expandBtn) {
+  if (rendered.classList.contains('expanded')) { return; }
+  const overflowing = rendered.scrollHeight > rendered.clientHeight + 1;
+  expandBtn.style.display = overflowing ? 'inline-block' : 'none';
+}
+
+function refreshMarkdownFields(scope) {
+  scope.querySelectorAll('.markdown-field').forEach(el => {
+    if (typeof el._checkOverflow === 'function') el._checkOverflow();
+  });
 }
 
 function render() {
   const q = document.getElementById('search').value.trim().toLowerCase();
+  const dateFrom = document.getElementById('dateFrom').value;
+  const dateTo = document.getElementById('dateTo').value;
   const filtered = allJobs.filter(j => {
+    if (dateFrom && (j.date_added || '') < dateFrom) return false;
+    if (dateTo && (j.date_added || '') > dateTo) return false;
     if (!q) return true;
     const haystack = [j.company, j.position_title, j.notes, j.location].join(' ').toLowerCase();
     return haystack.includes(q);
   });
 
   document.getElementById('stats').textContent = `${filtered.length} of ${allJobs.length} jobs`;
+
+  const DAILY_GOAL = 5;
+  const todayStr = localISODate(new Date());
+  const appliedToday = allJobs.filter(j => j.status === 'Applied' && (j.date_applied || '') === todayStr).length;
+  const goalBadge = document.getElementById('goalBadge');
+  goalBadge.textContent = `Applied today: ${appliedToday} / ${DAILY_GOAL}`;
+  goalBadge.classList.toggle('goal-met', appliedToday >= DAILY_GOAL);
 
   const board = document.getElementById('board');
   board.innerHTML = '';
@@ -468,6 +652,7 @@ function openModal(job) {
   panel.innerHTML = '';
   panel.appendChild(buildModalContent(job));
   backdrop.classList.remove('hidden');
+  refreshMarkdownFields(panel);
 }
 
 function closeModal() {
@@ -481,19 +666,48 @@ function buildModalContent(job) {
   head.className = 'modal-head';
 
   const titleBlock = document.createElement('div');
+  const companyRow = document.createElement('div');
+  companyRow.className = 'company-row';
+
+  const companyEditable = document.createElement('h2');
+  companyEditable.className = 'company-editable';
+  companyEditable.contentEditable = 'true';
+  companyEditable.textContent = job.company;
+  companyEditable.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      companyEditable.blur();
+    }
+  });
+  companyEditable.addEventListener('blur', () => {
+    const value = companyEditable.textContent.trim();
+    if (!value) {
+      companyEditable.textContent = job.company;
+      return;
+    }
+    if (value !== job.company) {
+      saveField(job, 'company', value, companyEditable).then((ok) => {
+        if (ok) {
+          render();
+          closeModal();
+        }
+      });
+    }
+  });
+  companyRow.appendChild(companyEditable);
+
   if (job.link) {
     const a = document.createElement('a');
-    a.className = 'company-link';
+    a.className = 'company-link-icon';
     a.href = job.link;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
-    a.textContent = job.company;
-    titleBlock.appendChild(a);
-  } else {
-    const h2 = document.createElement('h2');
-    h2.textContent = job.company;
-    titleBlock.appendChild(h2);
+    a.textContent = '↗';
+    a.title = job.link;
+    companyRow.appendChild(a);
   }
+  titleBlock.appendChild(companyRow);
+
   const subtitle = document.createElement('div');
   subtitle.className = 'modal-subtitle';
   subtitle.textContent = [job.position_title, job.location, job.date_added].filter(Boolean).join(' · ');
@@ -513,9 +727,23 @@ function buildModalContent(job) {
   frag.appendChild(buildModalDateField('Outreach Date', job, 'outreach_date'));
   frag.appendChild(buildModalDateField('Date Applied', job, 'date_applied'));
   frag.appendChild(buildModalFollowupField('Follow-up Log', job, 'followup_log'));
-  frag.appendChild(buildModalTextField('Notes', job, 'notes', true));
+  frag.appendChild(buildModalMarkdownField('Job Description', job, 'job_summary'));
+  frag.appendChild(buildModalMarkdownField('Notes', job, 'notes'));
+  frag.appendChild(buildDeleteField(job));
 
   return frag;
+}
+
+function buildDeleteField(job) {
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-field';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'delete-job-btn';
+  btn.textContent = 'Delete Job';
+  btn.addEventListener('click', () => deleteJob(job));
+  wrap.appendChild(btn);
+  return wrap;
 }
 
 function isValidISODate(str) {
@@ -562,8 +790,9 @@ function renderModalDateInput(job, field) {
     btn.addEventListener('click', () => {
       const input = document.createElement('input');
       input.type = 'date';
+      input.dataset.field = field;
       input.addEventListener('change', () => {
-        saveField(job, field, input.value, input);
+        saveField(job, field, input.value, input).then(() => render());
       });
       box.replaceWith(input);
     });
@@ -574,8 +803,9 @@ function renderModalDateInput(job, field) {
   const input = document.createElement('input');
   input.type = 'date';
   input.value = value;
+  input.dataset.field = field;
   input.addEventListener('change', () => {
-    saveField(job, field, input.value, input);
+    saveField(job, field, input.value, input).then(() => render());
   });
   return input;
 }
@@ -662,7 +892,12 @@ function buildModalStatusField(job) {
     select.appendChild(opt);
   }
   select.addEventListener('change', () => {
-    saveField(job, 'status', select.value, select).then(() => render());
+    saveField(job, 'status', select.value, select).then(() => {
+      render();
+      const panel = document.getElementById('modalPanel');
+      const dateInput = panel && panel.querySelector('input[data-field="date_applied"]');
+      if (dateInput) dateInput.value = job.date_applied || '';
+    });
   });
   wrap.appendChild(select);
   return wrap;
@@ -692,6 +927,72 @@ function buildModalTextField(label, job, field, isNotes) {
   return wrap;
 }
 
+function buildModalMarkdownField(label, job, field) {
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-field markdown-field';
+
+  const headerRow = document.createElement('div');
+  headerRow.className = 'markdown-field-header';
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  headerRow.appendChild(labelEl);
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'linklike';
+  editBtn.textContent = 'Edit';
+  headerRow.appendChild(editBtn);
+  wrap.appendChild(headerRow);
+
+  const rendered = document.createElement('div');
+  rendered.className = 'editable markdown-rendered';
+  rendered.dataset.field = field;
+  renderMarkdownInto(rendered, job[field]);
+  wrap.appendChild(rendered);
+
+  const expandBtn = document.createElement('button');
+  expandBtn.type = 'button';
+  expandBtn.className = 'linklike markdown-expand-btn';
+  expandBtn.textContent = 'Show more';
+  expandBtn.style.display = 'none';
+  expandBtn.addEventListener('click', () => {
+    const expanded = rendered.classList.toggle('expanded');
+    expandBtn.textContent = expanded ? 'Show less' : 'Show more';
+  });
+  wrap.appendChild(expandBtn);
+
+  wrap._checkOverflow = () => checkMarkdownOverflow(rendered, expandBtn);
+
+  editBtn.addEventListener('click', () => {
+    const textarea = document.createElement('textarea');
+    textarea.className = 'editable markdown-raw';
+    textarea.dataset.field = field;
+    textarea.value = job[field] || '';
+    textarea.addEventListener('blur', () => {
+      const value = textarea.value.trim();
+      const finish = () => {
+        const fresh = document.createElement('div');
+        fresh.className = 'editable markdown-rendered';
+        fresh.dataset.field = field;
+        renderMarkdownInto(fresh, job[field]);
+        textarea.replaceWith(fresh);
+        expandBtn.textContent = 'Show more';
+        wrap._checkOverflow = () => checkMarkdownOverflow(fresh, expandBtn);
+        wrap._checkOverflow();
+      };
+      if (value !== (job[field] || '')) {
+        saveField(job, field, value, textarea).then(finish);
+      } else {
+        finish();
+      }
+    });
+    expandBtn.style.display = 'none';
+    rendered.replaceWith(textarea);
+    textarea.focus();
+  });
+
+  return wrap;
+}
+
 async function saveField(job, field, value, cell) {
   const res = await fetch('/api/jobs/update', {
     method: 'POST',
@@ -699,19 +1000,47 @@ async function saveField(job, field, value, cell) {
     body: JSON.stringify({
       company: job.company,
       date_added: job.date_added,
+      position_title: job.position_title,
+      link: job.link,
       field,
       value,
     }),
   });
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* no body */ }
   if (res.ok) {
     job[field] = value;
+    if (data.date_applied !== undefined) job.date_applied = data.date_applied;
     cell.classList.remove('saved-flash');
     void cell.offsetWidth;
     cell.classList.add('saved-flash');
   } else {
-    alert('Failed to save change.');
+    alert(data.error || 'Failed to save change.');
+    if (cell && cell.isContentEditable) {
+      cell.textContent = job[field] || '';
+    }
   }
   return res.ok;
+}
+
+async function deleteJob(job) {
+  if (!confirm(`Delete the tracked job for ${job.company}${job.position_title ? ' — ' + job.position_title : ''}? This cannot be undone.`)) {
+    return;
+  }
+  const res = await fetch('/api/jobs/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ company: job.company, date_added: job.date_added, position_title: job.position_title, link: job.link }),
+  });
+  if (res.ok) {
+    allJobs = allJobs.filter(j => rowKey(j) !== rowKey(job));
+    closeModal();
+    render();
+  } else {
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* no body */ }
+    alert(data.error || 'Failed to delete job.');
+  }
 }
 
 function addDropHandlers(body) {
@@ -735,6 +1064,8 @@ function addDropHandlers(body) {
       body: JSON.stringify({
         company: job.company,
         date_added: job.date_added,
+        position_title: job.position_title,
+        link: job.link,
         field: 'status',
         value: newStatus,
       }),
@@ -776,6 +1107,28 @@ function buildAddJobModalContent() {
   errorEl.className = 'modal-error';
   errorEl.id = 'addJobError';
   frag.appendChild(errorEl);
+
+  const urlWrap = document.createElement('div');
+  urlWrap.className = 'modal-field';
+  const urlLabel = document.createElement('label');
+  urlLabel.textContent = 'Job URL';
+  urlWrap.appendChild(urlLabel);
+  const urlRow = document.createElement('div');
+  urlRow.style.display = 'flex';
+  urlRow.style.gap = '8px';
+  const urlInput = document.createElement('input');
+  urlInput.type = 'text';
+  urlInput.id = 'fetchUrl';
+  urlInput.placeholder = 'Paste a job posting URL...';
+  urlRow.appendChild(urlInput);
+  const fetchBtn = document.createElement('button');
+  fetchBtn.className = 'linklike';
+  fetchBtn.id = 'fetchUrlBtn';
+  fetchBtn.textContent = 'Fetch';
+  fetchBtn.addEventListener('click', fetchJobUrl);
+  urlRow.appendChild(fetchBtn);
+  urlWrap.appendChild(urlRow);
+  frag.appendChild(urlWrap);
 
   const fields = [
     { id: 'addCompany', label: 'Company *' },
@@ -841,6 +1194,42 @@ function buildAddJobModalContent() {
   return frag;
 }
 
+async function fetchJobUrl() {
+  const errorEl = document.getElementById('addJobError');
+  errorEl.style.display = 'none';
+  const url = document.getElementById('fetchUrl').value.trim();
+  if (!url) return;
+
+  const btn = document.getElementById('fetchUrlBtn');
+  btn.disabled = true;
+  btn.textContent = 'Fetching...';
+  try {
+    const res = await fetch('/api/jobs/fetch_url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = data.error || 'Failed to fetch job posting.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    document.getElementById('addCompany').value = data.company || '';
+    document.getElementById('addTitle').value = data.position_title || '';
+    document.getElementById('addLocation').value = data.location || '';
+    document.getElementById('addLink').value = data.link || '';
+    document.getElementById('addSummary').textContent = data.job_summary || '';
+    document.getElementById('addNotes').textContent = data.notes || '';
+  } catch (err) {
+    errorEl.textContent = 'Failed to fetch job posting — check the server logs.';
+    errorEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Fetch';
+  }
+}
+
 async function submitAddJob(submitBtn) {
   const errorEl = document.getElementById('addJobError');
   errorEl.style.display = 'none';
@@ -890,8 +1279,30 @@ async function submitAddJob(submitBtn) {
 }
 
 document.getElementById('addJobBtn').addEventListener('click', openAddJobModal);
+document.getElementById('exportCsvBtn').addEventListener('click', () => {
+  window.location = '/api/jobs/export.csv';
+});
 
 document.getElementById('search').addEventListener('input', render);
+document.getElementById('dateFrom').addEventListener('change', render);
+document.getElementById('dateTo').addEventListener('change', render);
+document.getElementById('filterToday').addEventListener('click', () => {
+  const today = localISODate(new Date());
+  document.getElementById('dateFrom').value = today;
+  document.getElementById('dateTo').value = today;
+  render();
+});
+document.getElementById('filterWeek').addEventListener('click', () => {
+  const today = new Date();
+  document.getElementById('dateFrom').value = startOfWeekISO(today);
+  document.getElementById('dateTo').value = localISODate(today);
+  render();
+});
+document.getElementById('filterClearDates').addEventListener('click', () => {
+  document.getElementById('dateFrom').value = '';
+  document.getElementById('dateTo').value = '';
+  render();
+});
 
 document.getElementById('modalBackdrop').addEventListener('click', (e) => {
   if (e.target.id === 'modalBackdrop') closeModal();
