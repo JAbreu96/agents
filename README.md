@@ -4,7 +4,7 @@ Claude Code skills and MCP servers for job search automation — tracking postin
 
 > **Works alongside [`career-ops`](https://github.com/JAbreu96/career-ops)** (cloned at `../career-ops`).
 > career-ops is the **front of the funnel** — job discovery/scan, A–F evaluation, ATS CV tailoring, company research, and interview prep — and its `data/applications.md` is the **source of truth** for tracking.
-> This repo is the **cloud comms layer**: use it only for **Hunter.io contact lookup** (`job-tracker`), **Gmail draft outreach** (`outreach-email`), and **Gmail inbound scanning** (`application-digest`). The full division of labor lives in `career-ops/modes/_custom.md`.
+> This repo is the **cloud comms layer**: use it only for **job tracking** (`job-tracker`), **Gmail draft outreach** (`outreach-email`), and **Gmail inbound scanning** (`application-digest`). The full division of labor lives in `career-ops/modes/_custom.md`.
 > Note: `job-tracker` writes contacts to the Google Sheet, so copy them into the matching `applications.md` row. Sheet-centric skills (`follow-up-reminder`, `job-digest`, `archive-jobs`) are secondary here — prefer career-ops's `followup`/`tracker`/`patterns` to avoid drift.
 
 ---
@@ -13,7 +13,7 @@ Claude Code skills and MCP servers for job search automation — tracking postin
 
 | Skill | What it does |
 |---|---|
-| `job-tracker` | Fetch a job URL, extract details, look up contacts via Hunter.io, and log to the Google Sheet |
+| `job-tracker` | Fetch a job URL, extract details, and log to the local job tracker DB |
 | `job-tracker-dispatch` | Same as above but uses Claude-in-Chrome instead of the gsheets MCP |
 | `outreach-email` | Draft a referral/networking email and save it as a Gmail draft |
 | `resume-review` | Score a resume against a job description, rewrite bullets, run ATS scan, export to Google Docs |
@@ -43,11 +43,9 @@ Copy `.env.example` to `.env` (or create `.env`) and fill in the values:
 ```bash
 # .env
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
-HUNTER_API_KEY=your_hunter_api_key
 ```
 
 - **`GOOGLE_APPLICATION_CREDENTIALS`** — path to your Google Cloud service account JSON file (see step 3)
-- **`HUNTER_API_KEY`** — from [hunter.io](https://hunter.io) — used by `job-tracker` and `job-tracker-dispatch` to look up contacts at companies
 
 ### 3. Google Cloud service account
 
@@ -166,16 +164,16 @@ The `outreach-email` skill uses hardcoded sender info. Update these fields in `.
 
 ## Skill dependencies at a glance
 
-| Skill | gsheets MCP | gmail MCP | job_tracker MCP | Hunter.io | Google Docs API |
-|---|:---:|:---:|:---:|:---:|:---:|
-| job-tracker | ✓ | | | ✓ | |
-| job-tracker-dispatch | | | | ✓ | |
-| outreach-email | ✓ | ✓ | | | |
-| resume-review | | | | | ✓ |
-| application-digest | ✓ | ✓ | | | |
-| follow-up-reminder | | ✓ | ✓ | | |
-| archive-jobs | | ✓ | ✓ | | |
-| job-digest | ✓ | | | | |
+| Skill | gsheets MCP | gmail MCP | job_tracker MCP | Google Docs API |
+|---|:---:|:---:|:---:|:---:|
+| job-tracker | ✓ | | | |
+| job-tracker-dispatch | | | | |
+| outreach-email | ✓ | ✓ | | |
+| resume-review | | | | ✓ |
+| application-digest | ✓ | ✓ | | |
+| follow-up-reminder | | ✓ | ✓ | |
+| archive-jobs | | ✓ | ✓ | |
+| job-digest | ✓ | | | |
 
 ---
 

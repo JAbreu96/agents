@@ -30,6 +30,30 @@ def _match_company(rows: list[dict], company: str) -> list[dict]:
     return [r for r in rows if query in r["company"].lower()]
 
 
+def _narrow(rows: list[dict], position_title: str = "", link: str = "") -> list[dict]:
+    """
+    Narrows company matches down to a single role.
+
+    A link is an exact identity, so it wins outright. Titles are matched exactly
+    first, then by substring in either direction, because ATS rejection emails
+    routinely pad the title they quote ("Software Engineer II, Backend - Platform
+    Team" vs a tracked "Software Engineer II"). Returns every surviving candidate;
+    deciding what to do with 0 or 2+ is the caller's job.
+    """
+    if link:
+        exact_link = [r for r in rows if r["link"].strip() == link.strip()]
+        if exact_link:
+            return exact_link
+    if not position_title:
+        return rows
+    want = position_title.lower().strip()
+    exact = [r for r in rows if r["position_title"].lower().strip() == want]
+    if exact:
+        return exact
+    return [r for r in rows
+            if want in r["position_title"].lower() or r["position_title"].lower().strip() in want]
+
+
 def _find_one_match(company: str) -> dict:
     rows = jobs_db.get_all_jobs()
     matches = _match_company(rows, company)
@@ -121,7 +145,7 @@ def mark_outreached(company: str, outreach_date: str = "") -> dict:
     }
 
 
-VALID_STATUSES = {"Tracking", "Applied", "Phone Screen", "Technical", "System Design", "Behavioral", "Offer", "Rejected"}
+VALID_STATUSES = {"Tracking", "Applied", "Phone Screen", "Technical", "System Design", "Behavioral", "Offer", "Accepted", "Rejected"}
 
 
 @mcp.tool()
@@ -170,21 +194,80 @@ def add_job(
 
 
 @mcp.tool()
-def update_job_status(company: str, status: str) -> dict:
+def update_job_status(company: str, status: str,
+                      position_title: str = "", link: str = "") -> dict:
     """
     Update the Status field for a job. Valid values:
-    Tracking, Applied, Phone Screen, Technical, System Design, Behavioral, Offer, Rejected.
+    Tracking, Applied, Phone Screen, Technical, System Design, Behavioral, Offer, Accepted, Rejected.
     - company: case-insensitive match
     - status: one of the valid status values above
+    - position_title: optional — required when the company has more than one tracked role
+    - link: optional — exact posting URL, the most precise way to target a row
+
+    Without position_title/link this updates the company's only row, and raises if
+    the company has several. Never guesses: one rejection email must not close out
+    every role at that company.
     """
     if status not in VALID_STATUSES:
         raise ValueError(f"Invalid status '{status}'. Must be one of: {', '.join(sorted(VALID_STATUSES))}")
 
-    row = _find_one_match(company)
+    if position_title or link:
+        matches = _narrow(_match_company(jobs_db.get_all_jobs(), company), position_title, link)
+        if not matches:
+            raise ValueError(
+                f"No job found for company '{company}' matching title '{position_title}' / link '{link}'."
+            )
+        if len(matches) > 1:
+            titles = ", ".join(r["position_title"] for r in matches)
+            raise ValueError(
+                f"Ambiguous — {len(matches)} roles at '{company}' match: {titles}. Pass an exact link."
+            )
+        row = matches[0]
+    else:
+        row = _find_one_match(company)
     jobs_db.update_status(row["company"], row["date_added"], status,
                           row["position_title"], row["link"])
 
-    return {"success": True, "company": row["company"], "status": status}
+    return {"success": True, "company": row["company"],
+            "position_title": row["position_title"], "status": status}
+
+
+@mcp.tool()
+def find_job_for_email(company: str, title_hint: str = "", link: str = "") -> dict:
+    """
+    Resolve an inbound email to exactly one tracked job, without writing anything.
+
+    Returns {"match": "exact"|"ambiguous"|"none", "candidates": [...]}.
+    Call this before updating status from an email: on "exact" it is safe to write
+    using the returned position_title, and on anything else the caller should ask a
+    human rather than guess. Built for inbox-triage, where a wrong silent write is
+    far more costly than an extra question.
+    """
+    rows = _match_company(jobs_db.get_all_jobs(), company)
+    if not rows:
+        return {"match": "none", "candidates": [], "reason": f"No tracked job for company '{company}'."}
+
+    matches = _narrow(rows, title_hint, link)
+    candidates = [_compact(r) for r in (matches or rows)]
+
+    # A single hit is only "exact" if something actually pinned it down. Without a
+    # title or link, _narrow is a pass-through, so a lone *substring* company hit
+    # would otherwise be reported as certain: "Citi" matches "08763 Citi Canada
+    # Technology Services ULC", and a US rejection would close a live Canadian role.
+    pinned = bool(link) or bool(title_hint) or \
+        any(r["company"].lower().strip() == company.lower().strip() for r in matches)
+
+    if len(matches) == 1 and pinned:
+        return {"match": "exact", "candidates": candidates}
+    if len(matches) == 1:
+        return {"match": "ambiguous", "candidates": candidates,
+                "reason": (f"'{company}' only matched '{matches[0]['company']}' as a substring "
+                           "and no title was given — too weak to write on.")}
+    if not matches:
+        return {"match": "none", "candidates": candidates,
+                "reason": f"'{company}' has {len(rows)} tracked role(s), none matching '{title_hint}'."}
+    return {"match": "ambiguous", "candidates": candidates,
+            "reason": f"{len(matches)} roles at '{company}' match '{title_hint}'."}
 
 
 @mcp.tool()
@@ -198,6 +281,19 @@ def update_notes(company: str, notes: str) -> dict:
     jobs_db.update_notes(row["company"], row["date_added"], notes,
                          row["position_title"], row["link"])
     return {"success": True, "company": row["company"], "notes": notes}
+
+
+@mcp.tool()
+def update_summary(company: str, job_summary: str) -> dict:
+    """
+    Overwrite the job_summary (JD) field for a job.
+    - company: case-insensitive match
+    - job_summary: new summary content (replaces existing value)
+    """
+    row = _find_one_match(company)
+    jobs_db.update_summary(row["company"], row["date_added"], job_summary,
+                           row["position_title"], row["link"])
+    return {"success": True, "company": row["company"], "job_summary": job_summary}
 
 
 @mcp.tool()
@@ -284,6 +380,53 @@ def archive_old_jobs(days: int = 60, dry_run: bool = False) -> dict:
         "days_threshold": days,
         "companies": result["companies"],
     }
+
+
+# --- Interviews (read-only) -------------------------------------------------
+# Writes go through the GUI only. Reading needs no single-job resolution, so
+# these are immune to the "Ambiguous match" problem that company-keyed writes
+# hit on companies with more than one tracked posting.
+
+@mcp.tool()
+def interview_rates() -> dict:
+    """
+    Conversion rate for each interview type: how often a round was followed by
+    another round (or an offer) versus followed by a rejection.
+
+    Rate = advanced / (advanced + failed). Rounds whose process is still open are
+    reported as in_flight and left out of the denominator, so a rate is never
+    dragged down by interviews you simply have not heard back about yet.
+    Each type also splits into `standalone` and `loop`: a failed onsite marks
+    every round inside it failed, since the rejection never says which round lost
+    it, and the split is what makes that influence visible.
+    """
+    return jobs_db.interview_stats()
+
+
+@mcp.tool()
+def list_interviews(company: str = "") -> list[dict]:
+    """
+    Every interview round logged, oldest first, each labelled advanced / failed /
+    in_flight. Pass `company` to narrow to one company (all of its postings).
+    """
+    rows = jobs_db.classify_interviews()
+    if company:
+        needle = company.strip().lower()
+        rows = [r for r in rows if needle in (r["company"] or "").lower()]
+    return [
+        {
+            "company": r["company"],
+            "position_title": r["position_title"],
+            "interview_type": r["type_label"] if r["interview_type"] == "other" and r["type_label"]
+                              else r["interview_type"],
+            "occurred_date": r["occurred_date"],
+            "loop_id": r["loop_id"],
+            "self_rating": r["self_rating"],
+            "outcome": r["outcome"],
+            "notes": r["notes"],
+        }
+        for r in rows
+    ]
 
 
 if __name__ == "__main__":

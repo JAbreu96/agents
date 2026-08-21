@@ -72,15 +72,8 @@ NOTES = """**Recent News**
 
 
 def main():
-    # ── Look up contacts via Hunter.io ────────────────────────────────────────
-    # reval.site is a job board — search by company name is not useful since
-    # company is undisclosed. Search by reval.site domain to find the recruiter.
-    print("Looking up contacts on Hunter.io for reval.site...")
-    contacts = JobTrackerAgent.find_contacts("reval.site", company="Reval")
-    if not contacts:
-        print("  No contacts found via Hunter.io.")
-    else:
-        print(f"  Found contacts:\n{contacts}")
+    # Contacts are entered by hand, not looked up automatically.
+    contacts = ""
 
     # ── Build the record ──────────────────────────────────────────────────────
     record = JobRecord(

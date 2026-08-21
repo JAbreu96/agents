@@ -15,7 +15,14 @@ def test_parse_job_page_basic_html():
       </body>
     </html>
     """
-    record = JobTrackerAgent.parse_job_page(html, "https://example.com/job")
+    # parse_job_page pipes its extracted text through refine_summary (which shells
+    # out to the claude CLI) and research_company (which hits the network). Neither
+    # is under test here, and leaving them live made this a slow, flaky test that
+    # failed whenever the CLI returned nothing usable. Stub them so this exercises
+    # parsing only.
+    with patch.object(JobTrackerAgent, "refine_summary", side_effect=lambda raw: raw), \
+         patch.object(JobTrackerAgent, "research_company", return_value=""):
+        record = JobTrackerAgent.parse_job_page(html, "https://example.com/job")
 
     assert record.title == "Senior Software Engineer"
     assert record.company == "Acme Corp"
@@ -101,3 +108,50 @@ def test_fetch_lever_job():
     assert record.summary == "Build scalable systems."
     assert record.company == "Acme"
     assert record.url == original_url
+
+
+def test_parse_job_page_makes_no_network_or_subprocess_calls():
+    """
+    Parsing is pure. If refine_summary or research_company creep back into this
+    path unstubbed, the unit tests start depending on a CLI and a network again.
+    """
+    html = "<html><head><title>T</title></head><body><h1>Engineer</h1></body></html>"
+    with patch("src.job_agent.requests.get") as get, \
+         patch("subprocess.run") as run, \
+         patch.object(JobTrackerAgent, "refine_summary", side_effect=lambda raw: raw), \
+         patch.object(JobTrackerAgent, "research_company", return_value=""):
+        JobTrackerAgent.parse_job_page(html, "https://example.com/job")
+
+    get.assert_not_called()
+    run.assert_not_called()
+
+
+def test_structured_children_still_win_over_raw_container_text():
+    """
+    The raw-text path is a last resort. When a container has real <p>/<li>
+    children, those are still what get extracted — bullets keep their markers.
+    """
+    html = """
+    <html><head><title>T</title></head><body>
+      <h1>Engineer</h1>
+      <div class='job-description'>
+        <p>We are looking for someone to build reliable backend services at scale.</p>
+        <li>Python</li>
+      </div>
+    </body></html>
+    """
+    with patch.object(JobTrackerAgent, "refine_summary", side_effect=lambda raw: raw), \
+         patch.object(JobTrackerAgent, "research_company", return_value=""):
+        record = JobTrackerAgent.parse_job_page(html, "https://example.com/job")
+
+    assert "reliable backend services" in record.summary
+    assert "• Python" in record.summary
+
+
+def test_container_with_no_usable_content_yields_empty_summary():
+    html = "<html><head><title>T</title></head><body><h1>Engineer</h1></body></html>"
+    with patch.object(JobTrackerAgent, "refine_summary", side_effect=lambda raw: raw), \
+         patch.object(JobTrackerAgent, "research_company", return_value=""):
+        record = JobTrackerAgent.parse_job_page(html, "https://example.com/job")
+
+    assert record.summary == ""

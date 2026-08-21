@@ -1,6 +1,6 @@
 ---
 name: job-tracker-dispatch
-description: Track a job posting — fetch a job URL, extract job details (title, company, location, summary), research the company, look up contacts via Hunter.io, and log it to the Google Sheets job tracker using the Claude-in-Chrome extension. Use when the user provides a job posting URL and wants to save it to their tracker. Does NOT require a Google Sheets MCP connector — uses the browser directly.
+description: Track a job posting — fetch a job URL, extract job details (title, company, location, summary), research the company, and log it to the Google Sheets job tracker using the Claude-in-Chrome extension. Use when the user provides a job posting URL and wants to save it to their tracker. Does NOT require a Google Sheets MCP connector — uses the browser directly.
 argument-hint: [job-posting-url]
 ---
 
@@ -89,24 +89,10 @@ Omit any section where no reliable data was found.
 
 ---
 
-## Step 4 — Look up contacts via Hunter.io
+## Step 4 — Contacts
 
-**Domain selection rule:** If the job URL is from a known job board (greenhouse.io, lever.co, ashbyhq.com, gem.com, builtin.com, builtinnyc.com, workday.com, myworkdayjobs.com, icims.com, jobvite.com, smartrecruiters.com, taleo.net, indeed.com, glassdoor.com), search by company name. Otherwise, use the domain from the job URL (strip `www.`).
-
-```bash
-# By domain:
-curl -s "https://api.hunter.io/v2/domain-search?domain={DOMAIN}&api_key=$HUNTER_API_KEY&limit=10&seniority=senior,executive&department=engineering,executive,management" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-for e in d.get('data', {}).get('emails', [])[:5]:
-    print(f\"{e.get('first_name','')} {e.get('last_name','')}\".strip(), '—', e.get('position','Unknown'), '—', e.get('value',''), f\"({e.get('confidence','?')}% confidence)\")
-"
-
-# By company name (job board URLs):
-curl -s "https://api.hunter.io/v2/domain-search?company={COMPANY_NAME}&api_key=$HUNTER_API_KEY&limit=10&seniority=senior,executive&department=engineering,executive,management" | python3 -c "..."
-```
-
-Format up to 5 contacts as `Full Name — Job Title — email@company.com (XX% confidence)`, one per line. Leave blank if no contacts found.
+Contacts are **not looked up automatically**. Leave the field blank when creating
+the row and fill it in by hand once you know who the actual person is.
 
 ---
 

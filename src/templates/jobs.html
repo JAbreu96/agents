@@ -356,6 +356,26 @@
     outline: 2px solid var(--accent);
     outline-offset: -1px;
   }
+  .interviews-field { grid-column: 1 / -1; }
+  .interview-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+  .interview-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
+  }
+  .interview-empty { font-size: 13px; color: var(--muted); }
+  .interview-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .interview-form input, .interview-form select {
+    padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card); color: var(--text); font-size: 13px;
+  }
+  .interview-error { color: #d64545; font-size: 12px; margin-top: 6px; }
+  .funnel-banner {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 28px; font-size: 13px;
+    background: var(--card); border-bottom: 1px solid var(--border); color: var(--text);
+  }
+  .funnel-banner a { color: var(--accent); margin-left: auto; }
+  .funnel-banner .muted-inline { color: var(--muted); }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
   .modal-error { color: #d64545; font-size: 12px; margin-bottom: 10px; display: none; }
 </style>
@@ -366,6 +386,7 @@
   <nav class="view-nav">
     <a href="/" class="active">Table</a>
     <a href="/kanban">Kanban</a>
+    <a href="/insights">Insights</a>
   </nav>
   <div class="stats" id="stats"></div>
   <div class="goal-badge" id="goalBadge"></div>
@@ -471,7 +492,10 @@ const STATUS_VALUES = {{ status_values | tojson }};
 let allJobs = [];
 
 async function loadJobs() {
-  const res = await fetch('/api/jobs');
+  // Arriving from the Insights funnel means matching the population it counted,
+  // archived rows included; otherwise this stays the working table.
+  const fromFunnel = new URLSearchParams(window.location.search).has('stage');
+  const res = await fetch('/api/jobs' + (fromFunnel ? '?include_archived=1' : ''));
   allJobs = await res.json();
   render();
 }
@@ -600,6 +624,7 @@ function render() {
   const filtered = allJobs.filter(j => {
     if (statusFilter === '__blank__' && (j.status || '').trim() !== '') return false;
     if (statusFilter && statusFilter !== '__blank__' && j.status !== statusFilter) return false;
+    if (!matchesFunnelFilter(j)) return false;
     if (dateFrom && (j.date_added || '') < dateFrom) return false;
     if (dateTo && (j.date_added || '') > dateTo) return false;
     if (!q) return true;
@@ -667,9 +692,229 @@ function buildDetailGrid(job) {
   grid.appendChild(makeFollowupField('Follow-up Log', job, 'followup_log'));
   grid.appendChild(makeMarkdownField('Job Description', job, 'job_summary'));
   grid.appendChild(makeMarkdownField('Notes', job, 'notes'));
+  grid.appendChild(makeInterviewsField(job));
   grid.appendChild(makeDeleteField(job));
 
   return grid;
+}
+
+const INTERVIEW_TYPES = {{ interview_types|tojson }};
+
+// The full composite key comes straight off the row the user opened, so an
+// interview is always attached to one specific posting - never matched by
+// company name, which is ambiguous for the companies you applied to twice.
+function jobKeyFields(job) {
+  return {
+    company: job.company || '',
+    date_added: job.date_added || '',
+    position_title: job.position_title || '',
+    link: job.link || '',
+  };
+}
+
+// --- Funnel drill-through ---------------------------------------------------
+// The Insights funnel links here with ?stage=&source=. Its stages are predicates
+// over several fields, not single status values, so they cannot ride the existing
+// status <select> - they filter alongside it.
+
+const SCREEN_STATUSES = ['phone screen', 'technical', 'system design', 'behavioral', 'final round'];
+const FUNNEL_FILTER = (() => {
+  const p = new URLSearchParams(window.location.search);
+  const stage = p.get('stage');
+  const source = p.get('source') || 'all';
+  return stage ? { stage, source } : null;
+})();
+let funnelInterviewedKeys = null;   // filled in only when the stage needs it
+
+function isAutoApplied(j) {
+  const n = (j.notes || '').toLowerCase();
+  return n.includes('applypass') || n.includes('auto-appl');
+}
+
+function matchesFunnelFilter(j) {
+  if (!FUNNEL_FILTER) return true;
+  const { stage, source } = FUNNEL_FILTER;
+  if (source === 'hand' && isAutoApplied(j)) return false;
+  if (source === 'auto' && !isAutoApplied(j)) return false;
+
+  const status = (j.status || '').trim().toLowerCase();
+  switch (stage) {
+    case 'applied':     return !!(j.date_applied || '').trim();
+    case 'outreached':  return !!(j.outreach_date || '').trim();
+    case 'screen':      return SCREEN_STATUSES.includes(status);
+    case 'rejected':    return status === 'rejected';
+    case 'interviewed':
+      return funnelInterviewedKeys
+        ? funnelInterviewedKeys.has(rowKey(j))
+        : true;   // banner says "loading" until the fetch lands
+    default:            return true;
+  }
+}
+
+function showFunnelBanner() {
+  if (!FUNNEL_FILTER) return;
+  const labels = {
+    applied: 'applied', outreached: 'outreached', screen: 'at an interview stage',
+    rejected: 'rejected', interviewed: 'interviewed',
+  };
+  const sources = { all: 'all sources', hand: 'hand-applied', auto: 'auto-submitted (ApplyPass)' };
+  const bar = document.createElement('div');
+  bar.className = 'funnel-banner';
+  const txt = document.createElement('span');
+  txt.innerHTML = `Filtered from <strong>Insights</strong>: ` +
+    `${labels[FUNNEL_FILTER.stage] || FUNNEL_FILTER.stage} &middot; ${sources[FUNNEL_FILTER.source] || FUNNEL_FILTER.source}` +
+    ` &middot; <span class="muted-inline">archived included, to match the funnel</span>`;
+  const clear = document.createElement('a');
+  clear.href = '/';
+  clear.textContent = 'clear';
+  bar.appendChild(txt);
+  bar.appendChild(clear);
+  document.querySelector('main, body').prepend(bar);
+}
+
+async function hydrateFunnelFilter() {
+  showFunnelBanner();
+  if (FUNNEL_FILTER && FUNNEL_FILTER.stage === 'interviewed') {
+    const rows = await (await fetch('/api/interviews')).json();
+    funnelInterviewedKeys = new Set(rows.map(r => rowKey(r)));
+    render();
+  }
+}
+
+function makeInterviewsField(job) {
+  const wrap = document.createElement('div');
+  wrap.className = 'detail-field interviews-field';
+
+  const label = document.createElement('label');
+  label.textContent = 'Interview Rounds';
+  wrap.appendChild(label);
+
+  const list = document.createElement('div');
+  list.className = 'interview-list';
+  list.textContent = 'Loading…';
+  wrap.appendChild(list);
+
+  const form = document.createElement('div');
+  form.className = 'interview-form';
+
+  const typeSel = document.createElement('select');
+  for (const t of INTERVIEW_TYPES) {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = t.replace(/_/g, ' ');
+    typeSel.appendChild(opt);
+  }
+
+  const labelInput = document.createElement('input');
+  labelInput.type = 'text';
+  labelInput.placeholder = 'describe it';
+  labelInput.style.display = 'none';
+  typeSel.addEventListener('change', () => {
+    labelInput.style.display = typeSel.value === 'other' ? '' : 'none';
+  });
+
+  const dateInput = document.createElement('input');
+  dateInput.type = 'date';
+  dateInput.value = new Date().toISOString().slice(0, 10);
+  dateInput.title = 'Date the round actually happened';
+
+  const ratingSel = document.createElement('select');
+  ratingSel.title = 'How it felt (optional)';
+  for (const r of ['', '1', '2', '3', '4', '5']) {
+    const opt = document.createElement('option');
+    opt.value = r;
+    opt.textContent = r === '' ? 'rating —' : r;
+    ratingSel.appendChild(opt);
+  }
+
+  const loopInput = document.createElement('input');
+  loopInput.type = 'text';
+  loopInput.placeholder = 'loop id (same onsite)';
+  loopInput.title = 'Rounds sharing a loop id resolve together as one onsite';
+
+  const notesInput = document.createElement('input');
+  notesInput.type = 'text';
+  notesInput.placeholder = 'notes';
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'primary';
+  btn.textContent = 'Log Round';
+
+  const err = document.createElement('div');
+  err.className = 'interview-error';
+
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    err.textContent = '';
+    const body = Object.assign(jobKeyFields(job), {
+      interview_type: typeSel.value,
+      type_label: labelInput.value.trim(),
+      occurred_date: dateInput.value,
+      self_rating: ratingSel.value,
+      loop_id: loopInput.value.trim(),
+      notes: notesInput.value.trim(),
+    });
+    const res = await fetch('/api/interviews/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { err.textContent = data.error || 'Could not log that round.'; return; }
+    loopInput.value = ''; notesInput.value = ''; ratingSel.value = ''; labelInput.value = '';
+    loadInterviews(job, list);
+  });
+
+  for (const el of [typeSel, labelInput, dateInput, ratingSel, loopInput, notesInput, btn]) {
+    el.addEventListener('click', (e) => e.stopPropagation());
+    form.appendChild(el);
+  }
+  wrap.appendChild(form);
+  wrap.appendChild(err);
+
+  loadInterviews(job, list);
+  return wrap;
+}
+
+async function loadInterviews(job, list) {
+  const params = new URLSearchParams(jobKeyFields(job));
+  const res = await fetch('/api/interviews?' + params.toString());
+  const rounds = await res.json();
+  list.innerHTML = '';
+  if (!rounds.length) {
+    list.innerHTML = '<span class="interview-empty">No rounds logged.</span>';
+    return;
+  }
+  for (const r of rounds) {
+    const row = document.createElement('div');
+    row.className = 'interview-row';
+    const type = r.interview_type === 'other' && r.type_label
+      ? r.type_label : (r.interview_type || '').replace(/_/g, ' ');
+    const bits = [r.occurred_date, type];
+    if (r.loop_id) bits.push('loop: ' + r.loop_id);
+    if (r.self_rating) bits.push(r.self_rating + '/5');
+    if (r.notes) bits.push(r.notes);
+    const span = document.createElement('span');
+    span.textContent = bits.join(' · ');
+    row.appendChild(span);
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'linklike';
+    del.textContent = 'remove';
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await fetch('/api/interviews/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: r.id}),
+      });
+      loadInterviews(job, list);
+    });
+    row.appendChild(del);
+    list.appendChild(row);
+  }
 }
 
 function makeDeleteField(job) {
@@ -1188,7 +1433,7 @@ document.getElementById('collapseAll').addEventListener('click', () => {
   document.querySelectorAll('tr.job-row').forEach(r => r.classList.remove('expanded'));
 });
 
-loadJobs();
+loadJobs().then(hydrateFunnelFilter);
 </script>
 </body>
 </html>

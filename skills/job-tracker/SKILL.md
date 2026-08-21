@@ -75,28 +75,11 @@ Omit any section where no reliable data is found. Be factual and concise. End th
 
 ---
 
-## Step 4 — Look up contacts via Hunter.io
+## Step 4 — Contacts
 
-Determine the domain to search:
-- If the URL is from a known job board domain (greenhouse.io, lever.co, ashbyhq.com, gem.com, builtin.com, builtinnyc.com, workday.com, myworkdayjobs.com, icims.com, jobvite.com, smartrecruiters.com, taleo.net, indeed.com, glassdoor.com), search by **company name** instead of domain.
-- Otherwise, use the domain from the job URL (strip `www.`).
-
-Fetch (using WebFetch):
-```
-https://api.hunter.io/v2/domain-search?domain={domain}&api_key=$HUNTER_API_KEY&limit=10&seniority=senior,executive&department=engineering,executive,management
-```
-Or if searching by company name:
-```
-https://api.hunter.io/v2/domain-search?company={company}&api_key=$HUNTER_API_KEY&limit=10&seniority=senior,executive&department=engineering,executive,management
-```
-
-From the response, format up to 5 contacts as:
-```
-Full Name — Job Title — email@company.com (XX% confidence)
-```
-One per line. If no contacts are found, leave this field blank.
-
----
+Contacts are **not looked up automatically**. Leave the contacts field empty when
+creating the row; fill it in by hand from the job tracker GUI or the
+`update_contacts` MCP tool once you know who the actual person is.
 
 ## Step 5 — Check for duplicates and find next empty row
 

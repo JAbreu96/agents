@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Insights</title>
+<script src="{{ url_for('static', filename='chart.umd.js') }}"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f8;
+    --card: #ffffff;
+    --border: #e2e2e6;
+    --text: #1d1d1f;
+    --muted: #6b6b74;
+    --accent: #3457d5;
+    --good: #1f8a4c;
+    --bad: #c0392b;
+    /* Data-viz roles. Validated against this page's real surface (--card),
+       not a generic one: 2 categorical slots, all six checks pass in both
+       modes (worst CVD dE 24.7 light / 26.8 dark against a >=8 target). */
+    --series-application: #2a78d6;
+    --series-outreach:    #eb6834;
+    --status-critical:    #d03b3b;
+    --grid:               #e1e0d9;
+    --axis:               #c3c2b7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16161a;
+      --card: #1f1f24;
+      --border: #303038;
+      --text: #eaeaef;
+      --muted: #9a9aa5;
+      --accent: #6f8dff;
+      --good: #4ec97f;
+      --bad: #ff7a6b;
+      --series-application: #3987e5;
+      --series-outreach:    #d95926;
+      --status-critical:    #d03b3b;
+      --grid:               #2c2c2a;
+      --axis:               #383835;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header { padding: 20px 28px; border-bottom: 1px solid var(--border); }
+  header h1 { margin: 0 0 10px; font-size: 20px; }
+  nav.view-nav { display: flex; gap: 4px; }
+  nav.view-nav a {
+    padding: 6px 12px; border-radius: 6px; text-decoration: none;
+    color: var(--text); font-size: 14px; border: 1px solid var(--border);
+  }
+  nav.view-nav a.active { background: var(--accent); color: #fff; }
+  main { padding: 24px 28px; max-width: 1100px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 20px;
+  }
+  .card h2 { margin: 0 0 4px; font-size: 15px; }
+  .card .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+
+  /* The source filter defaults to pooled, so its state has to be loud enough
+     that a rate is never read without knowing which rows it covers. */
+  .source-bar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 20px; margin-bottom: 20px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .source-bar .state { font-size: 15px; font-weight: 600; }
+  .source-bar .state .n { color: var(--muted); font-weight: 400; }
+  .source-seg { display: flex; gap: 4px; margin-left: auto; }
+  .source-seg button {
+    padding: 6px 12px; font-size: 13px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+  }
+  .source-seg button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .paths { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 760px) { .paths { grid-template-columns: 1fr; } }
+  .chart-wrap { position: relative; height: 190px; }
+  .untracked {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 10px; padding: 8px 10px; font-size: 12.5px; color: var(--muted);
+    border: 1px dashed var(--axis); border-radius: 6px;
+  }
+  .converge { display: flex; gap: 16px; flex-wrap: wrap; }
+  .tile {
+    flex: 1 1 160px; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px;
+  }
+  .tile .label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .tile .value { font-size: 30px; margin-top: 4px; }
+  .tile .foot { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .tile.exit { border-left: 3px solid var(--status-critical); }
+  .tile.exit .value { color: var(--status-critical); }
+  .tile a { color: inherit; text-decoration: none; }
+  .tile a:hover { text-decoration: underline; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .rate { font-weight: 600; }
+  .rate.good { color: var(--good); }
+  .rate.bad { color: var(--bad); }
+  .muted { color: var(--muted); }
+  .sub-row td { font-size: 13px; color: var(--muted); }
+  .sub-row td:first-child { padding-left: 26px; }
+  .note {
+    font-size: 13px; color: var(--muted); line-height: 1.5;
+    border-left: 3px solid var(--border); padding-left: 12px; margin-top: 12px;
+  }
+  .empty { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Insights</h1>
+  <nav class="view-nav">
+    <a href="/">Table</a>
+    <a href="/kanban">Kanban</a>
+    <a href="/insights" class="active">Insights</a>
+  </nav>
+</header>
+<main>
+
+  <div class="source-bar">
+    <div class="state">
+      Showing <span id="sourceLabel">all tracked jobs</span>
+      <span class="n">— <span id="sourceCount">0</span> rows</span>
+    </div>
+    <div class="source-seg">
+      <button data-source="all" class="active">All</button>
+      <button data-source="hand">Hand-applied</button>
+      <button data-source="auto">Auto (ApplyPass)</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Application funnel</h2>
+    <div class="sub">
+      Applying and outreaching are alternative routes, not sequential stages, so they
+      run as parallel paths and meet only at an interview. Percentages appear only
+      where the stage above has at least {{ rate_min }} rows.
+    </div>
+    <div class="paths">
+      <div>
+        <div class="chart-wrap"><canvas id="applicationChart"></canvas></div>
+      </div>
+      <div>
+        <div class="chart-wrap"><canvas id="outreachChart"></canvas></div>
+        <div class="untracked">
+          <span>&#8942;</span>
+          <span><strong>Replies: not tracked.</strong> No field records a reply to outreach,
+          so this path cannot be measured past "outreached" — that is unknown, not zero.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Where the paths meet</h2>
+    <div class="sub">Rejections are shown beside the paths, not inside them — an exit is not a step toward an interview.</div>
+    <div class="converge">
+      <div class="tile">
+        <div class="label">Interviewed</div>
+        <div class="value" id="tileInterviewed">0</div>
+        <div class="foot" id="tileInterviewedFoot">via either path</div>
+      </div>
+      <div class="tile">
+        <div class="label">Applied &amp; outreached</div>
+        <div class="value" id="tileBoth">0</div>
+        <div class="foot">rows on both paths</div>
+      </div>
+      <div class="tile exit">
+        <div class="label">Rejected</div>
+        <div class="value"><a id="tileRejected" href="/?stage=rejected">0</a></div>
+        <div class="foot">click to open these rows</div>
+      </div>
+    </div>
+    <div class="note">
+      <strong>"Interviewed" means a real evaluation happened</strong> — technical,
+      behavioral, system design, take-home, pairing or a final round. Recruiter and
+      phone screens stop at "at screen": they filter for plausibility rather than
+      testing whether you can do the job, so counting them here would inflate the
+      stage with calls that reject almost nobody.
+      "At screen" counts anyone sitting at a screening status now <em>or</em> with a
+      screening round logged — status holds current state only, so a job screened and
+      then rejected would otherwise forget it ever got there. It remains a floor, not
+      a total, until the interview log fills in.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Round outcomes by type</h2>
+    <div class="sub">
+      How often a round of each type was followed by another round, versus ended the process.
+      Rate is advanced &divide; (advanced + failed + ghosted). Rounds still in flight are excluded
+      from the denominator; ghosted ones are not.
+    </div>
+    {% set totals = stats.totals %}
+    <p class="muted" style="font-size:13px;margin:0 0 12px;">
+      <strong>{{ totals.rounds }}</strong> rounds logged &middot;
+      {{ totals.advanced }} advanced, {{ totals.failed }} failed,
+      {{ totals.ghosted }} ghosted, {{ totals.in_flight }} in flight
+      {% if totals.orphaned %} &middot; {{ totals.orphaned }} orphaned{% endif %}
+    </p>
+    {% if stats.by_type %}
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th><th class="num">Advanced</th><th class="num">Failed</th>
+          <th class="num">Ghosted</th><th class="num">In flight</th><th class="num">Rate</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in stats.by_type %}
+          <tr>
+            <td>{{ row.interview_type.replace("_", " ") }}</td>
+            <td class="num">{{ row.total.advanced }}</td>
+            <td class="num">{{ row.total.failed }}</td>
+            <td class="num">{{ row.total.ghosted }}</td>
+            <td class="num">{{ row.total.in_flight }}</td>
+            <td class="num">
+              {% if row.total.rate is none %}<span class="muted">&mdash;</span>
+              {% else %}<span class="rate {{ 'good' if row.total.rate >= 50 else 'bad' }}">{{ row.total.rate }}%</span>{% endif %}
+            </td>
+          </tr>
+          {% for scope in ["standalone", "loop"] %}
+            {% set c = row[scope] %}
+            {% if c.advanced or c.failed or c.ghosted or c.in_flight %}
+              <tr class="sub-row">
+                <td>{{ scope }}</td>
+                <td class="num">{{ c.advanced }}</td>
+                <td class="num">{{ c.failed }}</td>
+                <td class="num">{{ c.ghosted }}</td>
+                <td class="num">{{ c.in_flight }}</td>
+                <td class="num">{{ "—" if c.rate is none else (c.rate ~ "%") }}</td>
+              </tr>
+            {% endif %}
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="note">
+      <strong>Ghosted</strong> is derived, never typed: a round with nothing after it,
+      on a job that never closed, that has been silent for {{ ghost_days }}+ days. It counts
+      against the rate because it demonstrably did not advance you — but it is broken out
+      so you can see how much of a low rate is silence rather than rejection, which is
+      often about the company rather than about you.
+    </div>
+    {% else %}
+      <p class="empty">No interview rounds logged yet.</p>
+    {% endif %}
+  </div>
+</main>
+
+<script>
+const FUNNEL = {{ funnel|tojson }};
+const RATE_MIN = {{ rate_min }};
+
+// Chart.js cannot read CSS custom properties, so the palette is pulled from the
+// computed styles once per render and re-read whenever the OS theme flips. One
+// palette definition, in CSS, for both themes.
+function tokens() {
+  const cs = getComputedStyle(document.documentElement);
+  const get = (n) => cs.getPropertyValue(n).trim();
+  return {
+    application: get('--series-application'),
+    outreach: get('--series-outreach'),
+    text: get('--text'),
+    muted: get('--muted'),
+    grid: get('--grid'),
+    card: get('--card'),
+    border: get('--border'),
+  };
+}
+
+// Which table-view filter a stage maps to. 'tracked' has no predicate worth
+// following, so those bars are not clickable.
+const STAGE_LINK = {
+  applied: 'applied', 'at screen': 'screen', interviewed: 'interviewed',
+  outreached: 'outreached',
+};
+
+let charts = {};
+let currentSource = 'all';
+
+function buildChart(canvasId, stages, colorToken) {
+  const t = tokens();
+  const measured = stages.filter(s => s.count !== null);
+  const labels = measured.map(s => s.stage);
+  const data = measured.map(s => s.count);
+
+  if (charts[canvasId]) charts[canvasId].destroy();
+  charts[canvasId] = new Chart(document.getElementById(canvasId), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: canvasId === 'applicationChart' ? 'Application path' : 'Outreach path',
+        data,
+        backgroundColor: t[colorToken],
+        borderRadius: 4,          // rounded data-end, anchored at the baseline
+        borderSkipped: 'start',
+        barPercentage: 0.68,      // keeps a clear surface gap between bars
+        categoryPercentage: 0.86,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      maintainAspectRatio: false,
+      layout: { padding: { right: 44 } },
+      plugins: {
+        legend: {
+          display: true, position: 'top', align: 'start',
+          labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'rect' },
+        },
+        tooltip: {
+          backgroundColor: t.card, titleColor: t.text, bodyColor: t.text,
+          borderColor: t.border, borderWidth: 1, padding: 10, displayColors: false,
+          callbacks: {
+            label(ctx) {
+              const s = measured[ctx.dataIndex];
+              const out = [`${s.count} rows`];
+              if (s.rate !== null && s.rate !== undefined) {
+                out.push(`${s.rate}% of the stage above`);
+              } else if (ctx.dataIndex > 0) {
+                out.push(`no rate — fewer than ${RATE_MIN} rows above`);
+              }
+              if (STAGE_LINK[s.stage]) out.push('click to open these rows');
+              return out;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { beginAtZero: true, grid: { color: t.grid, drawBorder: false },
+             ticks: { color: t.muted, precision: 0 } },
+        y: { grid: { display: false }, ticks: { color: t.text } },
+      },
+      onClick(evt, els) {
+        if (!els.length) return;
+        const s = measured[els[0].index];
+        const stage = STAGE_LINK[s.stage];
+        if (!stage) return;
+        window.location.href = `/?stage=${encodeURIComponent(stage)}&source=${encodeURIComponent(currentSource)}`;
+      },
+      onHover(evt, els) {
+        const s = els.length ? measured[els[0].index] : null;
+        evt.native.target.style.cursor = (s && STAGE_LINK[s.stage]) ? 'pointer' : 'default';
+      },
+    },
+    plugins: [{
+      // Direct value labels: the counts span 729 to 1, so the short bars are
+      // unreadable against the axis alone.
+      id: 'valueLabels',
+      afterDatasetsDraw(chart) {
+        const { ctx } = chart;
+        ctx.save();
+        ctx.fillStyle = tokens().text;
+        ctx.font = '600 12px system-ui, -apple-system, sans-serif';
+        ctx.textBaseline = 'middle';
+        chart.getDatasetMeta(0).data.forEach((bar, i) => {
+          const s = measured[i];
+          const txt = s.rate !== null && s.rate !== undefined
+            ? `${s.count}  (${s.rate}%)` : `${s.count}`;
+          ctx.fillText(txt, bar.x + 8, bar.y);
+        });
+        ctx.restore();
+      },
+    }],
+  });
+}
+
+function render() {
+  const d = FUNNEL.sources[currentSource];
+  buildChart('applicationChart', d.application_path, 'application');
+  buildChart('outreachChart', d.outreach_path, 'outreach');
+
+  const appInt = d.application_path.find(s => s.stage === 'interviewed').count;
+  const outInt = d.outreach_path.find(s => s.stage === 'interviewed').count;
+  // Deliberately the distinct-job total, not appInt + outInt: a row can sit on
+  // both paths (double counted) or on neither (dropped), and either way the sum
+  // would disagree with the interview table further down the page.
+  document.getElementById('tileInterviewed').textContent = d.interviewed_total;
+  const parts = [`${appInt} via applications`, `${outInt} via outreach`];
+  if (d.interviewed_unattributed) {
+    parts.push(`${d.interviewed_unattributed} via neither (no application or outreach date)`);
+  }
+  document.getElementById('tileInterviewedFoot').textContent = parts.join(', ');
+  document.getElementById('tileBoth').textContent = d.both_paths;
+  const rej = document.getElementById('tileRejected');
+  rej.textContent = d.rejected;
+  rej.href = `/?stage=rejected&source=${encodeURIComponent(currentSource)}`;
+
+  document.getElementById('sourceCount').textContent =
+    d.application_path.find(s => s.stage === 'tracked').count;
+  document.getElementById('sourceLabel').textContent = {
+    all: 'all tracked jobs', hand: 'hand-applied only', auto: 'auto-submitted (ApplyPass) only',
+  }[currentSource];
+}
+
+document.querySelectorAll('.source-seg button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.source-seg button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentSource = btn.dataset.source;
+    render();
+  });
+});
+
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
+render();
+</script>
+</body>
+</html>

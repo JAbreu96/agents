@@ -115,7 +115,7 @@ class JobTrackerAgent:
             
             # Find main job content container (often has job-specific classes)
             main_content = None
-            for container_class in ["job-description", "job-details", "job-content", "main-content", "article-body"]:
+            for container_class in ["job-description", "job-details", "job-content", "main-content", "article-body", "description"]:
                 main_content = soup.find(class_=container_class)
                 if main_content:
                     break
@@ -141,7 +141,9 @@ class JobTrackerAgent:
                         if text and len(text) > 30 and not any(skip in text.lower() for skip in ["tech scene", "venture capital", "forbes", "company page", "navigate to"]):
                             key_parts.append(text)
                 
-                summary = " ".join(key_parts)
+                # A container holding plain text (no <p>/<li> children) yielded
+                # nothing at all before this — its own text is better than "".
+                summary = " ".join(key_parts) if key_parts else main_content.get_text(" ", strip=True)
         
         # Clean up: remove excessive whitespace and HTML entities
         summary = " ".join(summary.split())
@@ -161,16 +163,8 @@ class JobTrackerAgent:
             print(f"Researching company: {company_text}...")
             notes = JobTrackerAgent.research_company(company_text)
 
-        # Find contacts via Hunter.io using the job URL domain
+        # Contacts are entered by hand (GUI / MCP), not looked up automatically.
         contacts = ""
-        try:
-            from urllib.parse import urlparse
-            domain = urlparse(url).netloc.lstrip("www.")
-            if domain:
-                print(f"Looking up contacts for: {company_text or domain}...")
-                contacts = JobTrackerAgent.find_contacts(domain, company=company_text)
-        except Exception:
-            pass
 
         return JobRecord(
             url=url,
@@ -328,56 +322,6 @@ class JobTrackerAgent:
         )
 
     # Known job board domains — use company name lookup instead of domain lookup
-    JOB_BOARD_DOMAINS = {
-        "builtinnyc.com", "builtin.com", "greenhouse.io", "lever.co",
-        "ashbyhq.com", "myworkdayjobs.com", "workday.com", "icims.com",
-        "jobvite.com", "smartrecruiters.com", "taleo.net", "linkedin.com",
-        "indeed.com", "glassdoor.com",
-    }
-
-    @staticmethod
-    def find_contacts(domain: str, company: str = "", max_results: int = 5) -> str:
-        """Use Hunter.io to find recruiter/engineering contacts by domain or company name."""
-        api_key = os.getenv("HUNTER_API_KEY")
-        if not api_key:
-            print("Warning: HUNTER_API_KEY not set, skipping contact lookup.")
-            return ""
-        try:
-            # If the URL is a job board, search by company name instead
-            is_job_board = any(domain.endswith(jb) for jb in JobTrackerAgent.JOB_BOARD_DOMAINS)
-            params = {
-                "api_key": api_key,
-                "limit": 10,
-                "seniority": "senior,executive",
-                "department": "engineering,executive,management",
-            }
-            if is_job_board and company:
-                params["company"] = company
-            else:
-                params["domain"] = domain
-
-            resp = requests.get(
-                "https://api.hunter.io/v2/domain-search",
-                params=params,
-                timeout=10,
-            )
-            resp.raise_for_status()
-            data = resp.json().get("data", {})
-            emails = data.get("emails", [])
-            if not emails:
-                return ""
-            lines = []
-            for e in emails[:max_results]:
-                name = f"{e.get('first_name', '')} {e.get('last_name', '')}".strip() or "Unknown"
-                title = e.get("position") or e.get("department") or ""
-                email = e.get("value", "")
-                confidence = e.get("confidence", 0)
-                line = f"{name} — {title} — {email} ({confidence}% confidence)" if title else f"{name} — {email} ({confidence}% confidence)"
-                lines.append(line)
-            return "\n".join(lines)
-        except Exception as e:
-            print(f"Warning: Hunter.io lookup failed: {e}")
-            return ""
 
     @staticmethod
     def sheet_client_from_service_account(json_keyfile: str, scopes: Optional[list] = None) -> gspread.Client:
@@ -629,14 +573,6 @@ def run_agent(arguments: Optional[list] = None) -> None:
             print(f"Researching company: {company}...")
             notes = JobTrackerAgent.research_company(company)
         contacts = ""
-        try:
-            from urllib.parse import urlparse
-            domain = urlparse(args.url).netloc.lstrip("www.")
-            if domain:
-                print(f"Looking up contacts for: {company or domain}...")
-                contacts = JobTrackerAgent.find_contacts(domain, company=company)
-        except Exception:
-            pass
         record = JobRecord(
             url=args.url,
             title=args.title or "(unknown title)",
@@ -666,14 +602,6 @@ def run_agent(arguments: Optional[list] = None) -> None:
                 if record.company and record.company != '(unknown company)':
                     print(f"Researching company: {record.company}...")
                     record.notes = JobTrackerAgent.research_company(record.company)
-                try:
-                    from urllib.parse import urlparse
-                    domain = urlparse(args.url).netloc.lstrip('www.')
-                    if domain:
-                        print(f"Looking up contacts for: {record.company or domain}...")
-                        record.contacts = JobTrackerAgent.find_contacts(domain, company=record.company)
-                except Exception:
-                    pass
         else:
             html = JobTrackerAgent.fetch_page(args.url)
             record = JobTrackerAgent.parse_job_page(html, args.url)

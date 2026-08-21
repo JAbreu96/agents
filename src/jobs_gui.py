@@ -14,15 +14,23 @@ import sys
 from datetime import date
 from urllib.parse import urlparse
 
-from flask import Flask, Response, g, jsonify, render_template, request
+from flask import Flask, Response, g, jsonify, redirect, render_template, request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.job_agent import JobTrackerAgent  # noqa: E402
 from src.jobs_db import (  # noqa: E402
+    INTERVIEW_TYPES,
     _ensure_schema,
+    GHOSTED_AFTER_DAYS,
+    RATE_MIN_DENOMINATOR,
+    add_interview,
+    delete_interview,
     delete_job_by_key,
     export_csv,
     find_job_by_link,
+    funnel_stats,
+    get_interviews,
+    interview_stats,
     upsert_job,
 )
 
@@ -34,7 +42,7 @@ EDITABLE_COLUMNS = {
 }
 STATUS_VALUES = [
     "", "Tracking", "Applied", "Phone Screen", "Technical",
-    "System Design", "Behavioral", "Offer", "Rejected",
+    "System Design", "Behavioral", "Offer", "Accepted", "Rejected",
 ]
 
 app = Flask(__name__)
@@ -58,7 +66,8 @@ def close_db(exception=None):
 
 @app.route("/")
 def index():
-    return render_template("jobs.html", status_values=STATUS_VALUES)
+    return render_template("jobs.html", status_values=STATUS_VALUES,
+                           interview_types=INTERVIEW_TYPES)
 
 
 @app.route("/kanban")
@@ -68,8 +77,21 @@ def kanban():
 
 @app.route("/api/jobs")
 def api_jobs():
+    """
+    Archived rows are hidden by default — this is the working table.
+
+    ?include_archived=1 is what the Insights drill-through uses: the funnel counts
+    archived rows on purpose (a finished outcome is its most useful input), so a
+    click from a funnel stage has to land on the same population it just counted,
+    or the number changes when you follow it.
+    """
+    include_archived = request.args.get("include_archived") in ("1", "true", "yes")
     db = get_db()
-    rows = db.execute("SELECT * FROM jobs WHERE archived = 0 ORDER BY date_added DESC").fetchall()
+    query = "SELECT * FROM jobs"
+    if not include_archived:
+        query += " WHERE archived = 0"
+    query += " ORDER BY date_added DESC"
+    rows = db.execute(query).fetchall()
     return jsonify([dict(r) for r in rows])
 
 
@@ -222,6 +244,105 @@ def api_update_job():
     if date_applied_value is not None:
         result["date_applied"] = date_applied_value
     return jsonify(result)
+
+
+# --- Interviews -------------------------------------------------------------
+# The GUI is the only write path for interviews. Every other surface reads.
+# A job is identified here by its full composite key, taken straight from the
+# row the user clicked, so the "Ambiguous match" problem that company-keyed
+# lookups hit on the 67 companies with multiple postings never arises.
+
+@app.route("/insights")
+def insights_view():
+    return render_template(
+        "insights.html",
+        stats=interview_stats(),
+        funnel=funnel_stats(),
+        rate_min=RATE_MIN_DENOMINATOR,
+        ghost_days=GHOSTED_AFTER_DAYS,
+        interview_types=INTERVIEW_TYPES,
+    )
+
+
+@app.route("/interviews")
+def interviews_view():
+    """Kept so older bookmarks still land somewhere useful."""
+    return redirect("/insights", code=302)
+
+
+@app.route("/api/funnel")
+def api_funnel():
+    return jsonify(funnel_stats())
+
+
+@app.route("/api/interviews")
+def api_interviews():
+    return jsonify(get_interviews(
+        company=(request.args.get("company") or "").strip(),
+        date_added=(request.args.get("date_added") or "").strip(),
+        position_title=(request.args.get("position_title") or "").strip(),
+        link=(request.args.get("link") or "").strip(),
+    ))
+
+
+@app.route("/api/interviews/stats")
+def api_interview_stats():
+    return jsonify(interview_stats())
+
+
+@app.route("/api/interviews/add", methods=["POST"])
+def api_add_interview():
+    payload = request.get_json(force=True)
+    company = (payload.get("company") or "").strip()
+    date_added = (payload.get("date_added") or "").strip()
+    position_title = (payload.get("position_title") or "").strip()
+    link = (payload.get("link") or "").strip()
+    interview_type = (payload.get("interview_type") or "").strip()
+    occurred_date = (payload.get("occurred_date") or "").strip()
+    type_label = (payload.get("type_label") or "").strip()
+    loop_id = (payload.get("loop_id") or "").strip()
+    notes = (payload.get("notes") or "").strip()
+
+    rating = payload.get("self_rating")
+    if rating in ("", None):
+        rating = None
+    else:
+        try:
+            rating = int(rating)
+        except (TypeError, ValueError):
+            return jsonify({"error": "self_rating must be a whole number 1-5"}), 400
+
+    if not company:
+        return jsonify({"error": "company is required"}), 400
+    if interview_type not in INTERVIEW_TYPES:
+        return jsonify({"error": f"interview_type must be one of: {', '.join(INTERVIEW_TYPES)}"}), 400
+    if interview_type == "other" and not type_label:
+        return jsonify({"error": "type_label is required when interview_type is 'other'"}), 400
+    if not occurred_date:
+        return jsonify({"error": "occurred_date is required — log rounds that happened"}), 400
+
+    try:
+        new_id = add_interview(
+            company=company, date_added=date_added, position_title=position_title,
+            link=link, interview_type=interview_type, occurred_date=occurred_date,
+            type_label=type_label, loop_id=loop_id, self_rating=rating, notes=notes,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"id": new_id})
+
+
+@app.route("/api/interviews/delete", methods=["POST"])
+def api_delete_interview():
+    payload = request.get_json(force=True)
+    try:
+        interview_id = int(payload.get("id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "id is required"}), 400
+    removed = delete_interview(interview_id)
+    if not removed:
+        return jsonify({"error": "no interview with that id"}), 404
+    return jsonify({"deleted": removed})
 
 
 @app.route("/api/jobs/delete", methods=["POST"])
