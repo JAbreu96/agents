@@ -1,24 +1,37 @@
 {
   "mcpServers": {
     "job_tracker": {
-      "command": "/Users/joelchristabreu/.pyenv/shims/python3",
+      "command": "${HOME}/.pyenv/shims/python3",
       "args": [
-        "/Users/joelchristabreu/Documents/projects/agents/mcp_servers/job_tracker/server.py"
-      ],
-      "env": {
-        "GOOGLE_APPLICATION_CREDENTIALS": "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
-      }
+        "${HOME}/Documents/projects/agents/mcp_servers/job_tracker/server.py"
+      ]
     },
     "gmail_personal": {
       "command": "npx",
       "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"]
+    },
+    "gtasks": {
+      "command": "npx",
+      "args": ["-y", "@alvincrave/gtasks-mcp@0.2.0"],
+      "env": {
+        "GTASKS_CREDENTIALS_PATH": "${HOME}/.config/gtasks-mcp/gcp-oauth.keys.json",
+        "GTASKS_TOKEN_PATH": "${HOME}/.config/gtasks-mcp/token.json"
+      }
+    },
+    "gtasks_alt": {
+      "command": "npx",
+      "args": ["-y", "@alvincrave/gtasks-mcp@0.2.0"],
+      "env": {
+        "GTASKS_CREDENTIALS_PATH": "${HOME}/.config/gtasks-mcp/gcp-oauth.keys.json",
+        "GTASKS_TOKEN_PATH": "${HOME}/.config/gtasks-mcp/token-alt.json"
+      }
     },
     "gsheets": {
       "command": "npx",
       "args": ["-y", "mcp-gsheets@latest"],
       "env": {
         "GOOGLE_PROJECT_ID": "agents-491602",
-        "GOOGLE_APPLICATION_CREDENTIALS": "/Users/joelchristabreu/Documents/agents-491602-service-account.json"
+        "GOOGLE_APPLICATION_CREDENTIALS": "${HOME}/Documents/agents-491602-service-account.json"
       }
     }
   }
