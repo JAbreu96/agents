@@ -1,6 +1,6 @@
 ---
 name: sent-followup
-description: Scan the joelchristabreu4044@gmail.com sent folder for outreach and interview emails with no reply in 7+ days, check follow-up count via Gmail, draft follow-ups (max 2 per thread), and log dates to the job tracker sheet (col L).
+description: Scan the joelchristabreu4044@gmail.com sent folder for outreach and interview emails with no reply in 7+ days, check follow-up count via Gmail, draft follow-ups (max 2 per thread), and log dates to the local job tracker DB.
 argument-hint: "[days=7]"
 ---
 
@@ -9,21 +9,10 @@ Scan the sent folder for emails that haven't received a reply in `$ARGUMENTS` da
 ## User info
 - **Outreach email:** joelchristabreu4044@gmail.com
 - **Name:** Joelchrist Abreu
-- **Spreadsheet ID:** `1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q`
-- **Worksheet:** Sheet1
-- **Column layout:** A=Company, B=Position Title, C=Job Summary, D=Location, E=Link, F=Date Added, G=Contacts, H=Notes, I=Outreach Date, J=Date Applied, K=Status, **L=Follow-up Log**
 
 ---
 
-## Step 1 — Ensure column L header exists
-
-Use `mcp__gsheets__sheets_get_values` on `Sheet1!L1` to check if the header exists.
-
-If `L1` is empty or missing, write `Follow-up Log` to it using `mcp__gsheets__sheets_update_values` on `Sheet1!L1`.
-
----
-
-## Step 2 — Find sent emails in the follow-up window
+## Step 1 — Find sent emails in the follow-up window
 
 Use `mcp__gmail_personal__search_emails` with query:
 ```
@@ -49,7 +38,7 @@ Deduplicate by `threadId` — keep only the **original sent email** per thread (
 
 ---
 
-## Step 3 — Filter out threads that already have a reply
+## Step 2 — Filter out threads that already have a reply
 
 For each unique thread from Step 2, check for an inbound reply:
 
@@ -64,7 +53,7 @@ If no matching inbound message found → keep the thread as a candidate.
 
 ---
 
-## Step 4 — Check follow-up count (Gmail source of truth)
+## Step 3 — Check follow-up count (Gmail source of truth)
 
 For each candidate thread, count how many follow-ups have already been sent by searching:
 
@@ -80,7 +69,7 @@ This ensures the 2-follow-up cap is enforced from Gmail itself, regardless of wh
 
 ---
 
-## Step 5 — Categorize each eligible thread
+## Step 4 — Categorize each eligible thread
 
 Classify each remaining thread as one of two types:
 
@@ -91,7 +80,7 @@ Classify each remaining thread as one of two types:
 
 ---
 
-## Step 6 — Draft follow-up emails
+## Step 5 — Draft follow-up emails
 
 For each eligible thread, draft an appropriate follow-up.
 
@@ -160,11 +149,9 @@ For each thread, call `mcp__gmail_personal__draft_email` with:
 
 ---
 
-## Step 7 — Log follow-up dates to SQLite + sheet
+## Step 6 — Log follow-up dates to the tracker
 
-After saving each draft, record today's date in both the local SQLite cache and column L of the sheet.
-
-### 7a — Update SQLite (primary)
+After saving each draft, record today's date in the local job tracker DB.
 
 Run the following Python snippet, replacing `{Company}` and `{today}` with actual values:
 
@@ -175,29 +162,20 @@ from src.jobs_db import update_followup_log
 
 try:
     updated = update_followup_log("{Company}", "{today}")
-    print(f"SQLite updated: {updated}")
+    print(f"Tracker updated: {updated}")
 except ValueError as e:
     print(f"Skipped (cap reached): {e}")
 except RuntimeError as e:
-    print(f"SQLite unavailable: {e}")
+    print(f"Tracker DB unavailable: {e}")
 ```
 
 - `update_followup_log` enforces the 2-follow-up cap and returns the new log string (e.g. `2026-07-05, 2026-07-12`)
 - If it raises `ValueError`, the cap was already reached — skip this thread and log it in the report
-
-### 7b — Mirror to sheet (col L)
-
-Use the updated log string returned by `update_followup_log` to write back to the sheet.
-
-First, find the row number using `mcp__job_tracker__get_job_by_company` with the company name.
-
-If no match is found, skip the sheet update and note it in the report as "not in tracker."
-
-Then use `mcp__gsheets__sheets_update_values` on `Sheet1!L{row}` to write the updated log string.
+- If the company isn't found in the tracker at all, note it in the report as "not in tracker."
 
 ---
 
-## Step 8 — Report back
+## Step 7 — Report back
 
 After all drafts are saved, report:
 

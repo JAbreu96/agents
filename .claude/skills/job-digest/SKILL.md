@@ -1,27 +1,19 @@
 ---
 name: job-digest
-description: Generate a digest of the job tracker Google Sheet — shows all tracked jobs with status (applied/stale/not_applied) and summary stats. Uses the gsheets MCP server to read the sheet directly.
+description: Generate a digest of the job tracker — shows all tracked jobs with status (applied/stale/not_applied) and summary stats. Uses the job_tracker MCP server (local DB) to read the tracker directly.
 ---
 
 Generate a job tracker digest by following these steps:
 
-## Spreadsheet info
-- Spreadsheet ID: `1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q`
-- Worksheet: `Sheet1`
-- Column layout (1-based): A=Company, B=Position Title, C=Job Summary, D=Location, E=Link, F=Date Added, G=Contacts
-- Note: there is no Date Applied column — all jobs are classified as either `not_applied` or `stale` based on Date Added
+## Step 1 — Read the tracker
 
-## Step 1 — Read the sheet
-
-Use the `gsheets` MCP tool to read all rows from the spreadsheet. Read the full range (e.g. `Sheet1!A1:G` or equivalent) to get the header and all data rows.
-
-Skip the header row (row 1) and skip any completely empty rows.
+Call `mcp__job_tracker__list_all_jobs` to get every tracked (non-archived) job in compact form (`company`, `title`, `link`, `date_added`, `date_applied`, `status`, `outreach_date`).
 
 ## Step 2 — Classify each job
 
-For each row, assign a status using today's date (`$CURRENT_DATE`):
-- **not_applied** — column F (Date Added) is within the last 14 days
-- **stale** — column F (Date Added) is more than 14 days ago
+For each job, assign a status using today's date (`$CURRENT_DATE`), based on `date_added`:
+- **not_applied** — `date_added` is within the last 14 days
+- **stale** — `date_added` is more than 14 days ago
 
 ## Step 3 — Compute stats
 

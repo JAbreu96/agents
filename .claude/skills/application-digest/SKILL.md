@@ -1,24 +1,19 @@
 ---
 name: application-digest
-description: Check Gmail for job application updates in the last 24 hours, match them to tracked jobs in the Google Sheets job tracker, and send a digest email to the user. Run this on a schedule or on-demand.
+description: Check Gmail for job application updates in the last 24 hours, match them to tracked jobs in the local job tracker DB, and send a digest email to the user. Run this on a schedule or on-demand.
 argument-hint: "(no arguments required)"
 ---
 
-Check Gmail for job application update emails from the last 24 hours, cross-reference them with the job tracker sheet, and send a digest to ajoelcrist@gmail.com.
+Check Gmail for job application update emails from the last 24 hours, cross-reference them with the job tracker, and send a digest to ajoelcrist@gmail.com.
 
 ## User info
 - **Email:** ajoelcrist@gmail.com
-- **Spreadsheet ID:** `1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q`
 
 ---
 
 ## Step 1 — Pull tracked companies from the job tracker
 
-Use `mcp__gsheets__sheets_get_values` to read the job tracker:
-- **spreadsheetId:** `1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q`
-- **range:** `Sheet1!A1:Z`
-
-Extract the list of company names from the sheet. You'll use these to match against emails found in Step 2.
+Call `mcp__job_tracker__list_all_jobs` and extract the list of company names. You'll use these to match against emails found in Step 2.
 
 ---
 
@@ -53,7 +48,7 @@ For each email found, determine:
 
 ## Step 3b — Update the job tracker status
 
-For each email that matched a tracked company, call `mcp__job_tracker__update_job_status` to write the status back to the sheet.
+For each email that matched a tracked company, call `mcp__job_tracker__update_job_status` to write the new status to the tracker.
 
 Map email category → Status value:
 | Email Category | Status |
@@ -69,25 +64,6 @@ Map email category → Status value:
 Only update if the new status represents a **forward progression** — do not downgrade (e.g., don't set `Applied` if status is already `Phone Screen`).
 
 Skip companies labeled `Unknown / New` — no tracker row to update.
-
----
-
-## Step 3c — Sync status to local SQLite cache
-
-`mcp__job_tracker__update_job_status` only writes to the Google Sheet. For each company updated in Step 3b, also update the local SQLite cache (`data/jobs.db`) so the job-tracker GUI reflects the new status immediately:
-
-```python
-import sys
-sys.path.insert(0, '/Users/joelchristabreu/Documents/projects/agents')
-from src.jobs_db import get_job, upsert_job
-
-job = get_job("{Company}")
-if job:
-    job["status"] = "{New Status}"
-    upsert_job(job)
-```
-
-If `get_job` returns `None`, the local cache doesn't have this company yet — skip silently (it'll pick it up on the next full sync).
 
 ---
 
@@ -141,6 +117,6 @@ Use `mcp__gmail_personal__send_email` with:
 Report back:
 - How many emails were found and categorized
 - How many matched tracked companies
-- Which jobs had their status updated in the sheet (company → new status)
+- Which jobs had their status updated (company → new status)
 - Whether the digest was sent successfully
 - Any action items surfaced
