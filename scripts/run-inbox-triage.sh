@@ -10,16 +10,18 @@ export PATH="$HOME/.nvm/versions/node/v18.20.4/bin:$HOME/.local/bin:/usr/local/b
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-LOG_DIR="$HOME/Library/Logs/follow-up-reminder"
+LOG_DIR="$HOME/Library/Logs/inbox-triage"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d).log"
 
-echo "=== follow-up-reminder run: $(date) ===" >> "$LOG_FILE"
+echo "=== inbox-triage run: $(date) ===" >> "$LOG_FILE"
 
-claude -p "/follow-up-reminder" \
+# No send_email on purpose: triage reports to this log, never to the inbox
+# it exists to keep quiet. Bash is needed for the watermark read/write.
+claude -p "/inbox-triage" \
   --mcp-config .mcp.json \
   --strict-mcp-config \
-  --allowedTools "mcp__job_tracker__list_jobs_needing_followup,mcp__job_tracker__update_notes,mcp__gmail_personal__send_email,mcp__gmail_personal__draft_email,mcp__gmail_personal__search_emails" \
+  --allowedTools "mcp__gmail_personal__search_emails,mcp__gmail_personal__read_email,mcp__job_tracker__find_job_for_email,mcp__job_tracker__update_job_status,mcp__job_tracker__update_notes,mcp__job_tracker__add_job,mcp__job_tracker__list_all_jobs,mcp__gtasks__list,mcp__gtasks__list_task_lists,mcp__gtasks__create,Bash" \
   >> "$LOG_FILE" 2>&1
 
 echo "=== done ===" >> "$LOG_FILE"
