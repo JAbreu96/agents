@@ -1,0 +1,573 @@
+{
+  "_comment": "Gmail-confirmed job applications backing the NYS WS-5 work search record. Append one entry per confirmed application. Rejection/status-update emails must NOT be added - they are not work-search activities you performed.",
+  "applications": [
+    {
+      "date": "2026-05-14",
+      "company": "Benchling"
+    },
+    {
+      "date": "2026-05-19",
+      "company": "Adapt"
+    },
+    {
+      "date": "2026-05-21",
+      "company": "Commure"
+    },
+    {
+      "date": "2026-05-21",
+      "company": "Outtake"
+    },
+    {
+      "date": "2026-05-21",
+      "company": "Nuvo"
+    },
+    {
+      "date": "2026-05-21",
+      "company": "StubHub"
+    },
+    {
+      "date": "2026-05-28",
+      "company": "Formation Bio"
+    },
+    {
+      "date": "2026-05-28",
+      "company": "Credal",
+      "position": "Full Stack Software Engineer",
+      "contact": "no-reply@ashbyhq.com"
+    },
+    {
+      "date": "2026-05-28",
+      "company": "SafeLease"
+    },
+    {
+      "date": "2026-05-28",
+      "company": "Tools for Humanity"
+    },
+    {
+      "date": "2026-05-28",
+      "company": "Collective"
+    },
+    {
+      "date": "2026-05-29",
+      "company": "LiveFlow"
+    },
+    {
+      "date": "2026-05-29",
+      "company": "Catalog"
+    },
+    {
+      "date": "2026-05-29",
+      "company": "Brex"
+    },
+    {
+      "date": "2026-05-29",
+      "company": "Vercel"
+    },
+    {
+      "date": "2026-05-30",
+      "company": "Fieldguide"
+    },
+    {
+      "date": "2026-05-30",
+      "company": "Electronic Arts"
+    },
+    {
+      "date": "2026-05-30",
+      "company": "Discord"
+    },
+    {
+      "date": "2026-05-30",
+      "company": "UiPath"
+    },
+    {
+      "date": "2026-05-30",
+      "company": "Opendoor"
+    },
+    {
+      "date": "2026-05-30",
+      "company": "Ensora Health"
+    },
+    {
+      "date": "2026-05-30",
+      "company": "Harper"
+    },
+    {
+      "date": "2026-05-30",
+      "company": "RunPod"
+    },
+    {
+      "date": "2026-05-31",
+      "company": "Scale AI"
+    },
+    {
+      "date": "2026-05-31",
+      "company": "EvenUp"
+    },
+    {
+      "date": "2026-05-31",
+      "company": "Middesk"
+    },
+    {
+      "date": "2026-05-31",
+      "company": "Affirm"
+    },
+    {
+      "date": "2026-05-31",
+      "company": "Warner Bros."
+    },
+    {
+      "date": "2026-05-31",
+      "company": "Cala Health"
+    },
+    {
+      "date": "2026-05-31",
+      "company": "Robinhood"
+    },
+    {
+      "date": "2026-05-31",
+      "company": "Alex AI"
+    },
+    {
+      "date": "2026-05-31",
+      "company": "BitGo"
+    },
+    {
+      "date": "2026-05-31",
+      "company": "Future Motion"
+    },
+    {
+      "date": "2026-06-01",
+      "company": "The Home Depot"
+    },
+    {
+      "date": "2026-06-01",
+      "company": "Cape"
+    },
+    {
+      "date": "2026-06-01",
+      "company": "Grow Therapy"
+    },
+    {
+      "date": "2026-06-02",
+      "company": "Sparrow"
+    },
+    {
+      "date": "2026-06-02",
+      "company": "Protolabs"
+    },
+    {
+      "date": "2026-06-02",
+      "company": "Mia Labs"
+    },
+    {
+      "date": "2026-06-02",
+      "company": "r.Potential"
+    },
+    {
+      "date": "2026-06-02",
+      "company": "Prelim"
+    },
+    {
+      "date": "2026-06-03",
+      "company": "LaunchDarkly"
+    },
+    {
+      "date": "2026-06-03",
+      "company": "Wispr Flow"
+    },
+    {
+      "date": "2026-06-03",
+      "company": "Verse Medical"
+    },
+    {
+      "date": "2026-06-03",
+      "company": "Assort Health"
+    },
+    {
+      "date": "2026-06-03",
+      "company": "Serval"
+    },
+    {
+      "date": "2026-06-08",
+      "company": "Reverb",
+      "position": "Software Engineer - Shipping",
+      "contact": "no-reply@ats.rippling.com"
+    },
+    {
+      "date": "2026-06-08",
+      "company": "Interface AI"
+    },
+    {
+      "date": "2026-06-10",
+      "company": "OpenGov"
+    },
+    {
+      "date": "2026-06-15",
+      "company": "Planhat",
+      "position": "Forward Deployed Engineer, Los Angeles",
+      "contact": "no-reply@ashbyhq.com"
+    },
+    {
+      "date": "2026-06-17",
+      "company": "Rundoo"
+    },
+    {
+      "date": "2026-06-17",
+      "company": "StackOne"
+    },
+    {
+      "date": "2026-06-23",
+      "company": "Attio",
+      "position": "Forward Deployed Engineer",
+      "contact": "careers@mail.attio.com"
+    },
+    {
+      "date": "2026-06-25",
+      "company": "Simula",
+      "position": "Founding Engineer",
+      "person": "David McKernan, Recruiter",
+      "method": "Email",
+      "contact": "david.mckernan@mail.manatal.com"
+    },
+    {
+      "date": "2026-06-29",
+      "company": "Roblox",
+      "position": "Software Engineer, User Sharing",
+      "contact": "no-reply@roblox.com",
+      "result": "Not hired"
+    },
+    {
+      "date": "2026-07-02",
+      "company": "F2",
+      "position": "Forward Deployed Engineer",
+      "contact": "no-reply@ashbyhq.com"
+    },
+    {
+      "date": "2026-07-07",
+      "company": "Atera"
+    },
+    {
+      "date": "2026-07-08",
+      "company": "Clera",
+      "position": "Early-Stage Startup Engineer",
+      "contact": "no-reply@ashbyhq.com"
+    },
+    {
+      "date": "2026-07-09",
+      "company": "Voxel"
+    },
+    {
+      "date": "2026-07-17",
+      "company": "Melotech"
+    },
+    {
+      "date": "2026-07-17",
+      "company": "Triple Whale"
+    },
+    {
+      "date": "2026-07-20",
+      "company": "Delta Air Lines"
+    },
+    {
+      "date": "2026-07-20",
+      "company": "Counsel Health"
+    },
+    {
+      "date": "2026-07-20",
+      "company": "Titan"
+    },
+    {
+      "date": "2026-07-20",
+      "company": "Eve Legal",
+      "position": "Product Engineer (Full Stack)",
+      "contact": "no-reply@us.greenhouse-mail.io"
+    },
+    {
+      "date": "2026-07-20",
+      "company": "LVT",
+      "position": "Fullstack Software Engineer II",
+      "contact": "no-reply@us.greenhouse-mail.io"
+    },
+    {
+      "date": "2026-07-21",
+      "company": "Clerkie"
+    },
+    {
+      "date": "2026-07-21",
+      "company": "Peakhealth AI"
+    },
+    {
+      "date": "2026-07-21",
+      "company": "Treehouse"
+    },
+    {
+      "date": "2026-07-21",
+      "company": "PrairieLearn"
+    },
+    {
+      "date": "2026-07-21",
+      "company": "XDOF"
+    },
+    {
+      "date": "2026-07-22",
+      "company": "MongoDB"
+    },
+    {
+      "date": "2026-07-22",
+      "company": "Aditude"
+    },
+    {
+      "date": "2026-07-22",
+      "company": "Partiful"
+    },
+    {
+      "date": "2026-07-22",
+      "company": "Thought Machine"
+    },
+    {
+      "date": "2026-07-22",
+      "company": "Fluidstack"
+    },
+    {
+      "date": "2026-07-23",
+      "company": "Amazon"
+    },
+    {
+      "date": "2026-07-23",
+      "company": "Cottingham & Butler"
+    },
+    {
+      "date": "2026-07-23",
+      "company": "Medallion"
+    },
+    {
+      "date": "2026-07-23",
+      "company": "Vestwell"
+    },
+    {
+      "date": "2026-07-23",
+      "company": "General Intuition (Medal)"
+    },
+    {
+      "date": "2026-07-23",
+      "company": "Revin"
+    },
+    {
+      "date": "2026-07-23",
+      "company": "Tavily"
+    },
+    {
+      "date": "2026-07-23",
+      "company": "Optimum",
+      "position": "Software Dev Engineer II",
+      "contact": "NoReply@optimum.com",
+      "result": "Not hired"
+    },
+    {
+      "date": "2026-07-23",
+      "company": "Fanvue"
+    },
+    {
+      "date": "2026-07-24",
+      "company": "Madhive"
+    },
+    {
+      "date": "2026-07-24",
+      "company": "Capgemini"
+    },
+    {
+      "date": "2026-07-24",
+      "company": "Zebra Technologies"
+    },
+    {
+      "date": "2026-07-25",
+      "company": "Hippo"
+    },
+    {
+      "date": "2026-07-25",
+      "company": "Brain Corp"
+    },
+    {
+      "date": "2026-07-25",
+      "company": "Veras"
+    },
+    {
+      "date": "2026-07-25",
+      "company": "Junior"
+    },
+    {
+      "date": "2026-07-26",
+      "company": "ether.fi"
+    },
+    {
+      "date": "2026-07-26",
+      "company": "Picnic"
+    },
+    {
+      "date": "2026-07-26",
+      "company": "Rent the Runway"
+    },
+    {
+      "date": "2026-07-26",
+      "company": "Gamma"
+    },
+    {
+      "date": "2026-07-26",
+      "company": "H Company"
+    },
+    {
+      "date": "2026-07-26",
+      "company": "Kivo Health"
+    },
+    {
+      "date": "2026-07-27",
+      "company": "TrueFoundry"
+    },
+    {
+      "date": "2026-07-27",
+      "company": "Squarespace"
+    },
+    {
+      "date": "2026-07-27",
+      "company": "Indicium AI"
+    },
+    {
+      "date": "2026-07-27",
+      "company": "Harvey"
+    },
+    {
+      "date": "2026-07-27",
+      "company": "Link Logistics"
+    },
+    {
+      "date": "2026-07-27",
+      "company": "Column"
+    },
+    {
+      "date": "2026-07-27",
+      "company": "Moon"
+    },
+    {
+      "date": "2026-07-27",
+      "company": "Sift Stack, Inc."
+    },
+    {
+      "date": "2026-07-27",
+      "company": "Hire Hangar"
+    },
+    {
+      "date": "2026-07-27",
+      "company": "Upgraid"
+    },
+    {
+      "date": "2026-07-27",
+      "company": "Numeric"
+    },
+    {
+      "date": "2026-07-27",
+      "company": "Southwest Airlines"
+    },
+    {
+      "date": "2026-07-28",
+      "company": "Energyhub"
+    },
+    {
+      "date": "2026-07-28",
+      "company": "Notion"
+    },
+    {
+      "date": "2026-07-28",
+      "company": "Karat Financial"
+    },
+    {
+      "date": "2026-07-28",
+      "company": "Atoms"
+    },
+    {
+      "date": "2026-07-28",
+      "company": "Outset"
+    },
+    {
+      "date": "2026-07-28",
+      "company": "Tabs"
+    },
+    {
+      "date": "2026-07-29",
+      "company": "Roo"
+    },
+    {
+      "date": "2026-07-29",
+      "company": "Whatnot"
+    },
+    {
+      "date": "2026-07-29",
+      "company": "Dorsia"
+    },
+    {
+      "date": "2026-07-29",
+      "company": "Abnormal AI"
+    },
+    {
+      "date": "2026-07-29",
+      "company": "Gradial"
+    },
+    {
+      "date": "2026-07-29",
+      "company": "Ramp"
+    },
+    {
+      "date": "2026-07-30",
+      "company": "Authenticinsurance"
+    },
+    {
+      "date": "2026-07-30",
+      "company": "Commure"
+    },
+    {
+      "date": "2026-07-31",
+      "company": "Formation Bio"
+    },
+    {
+      "date": "2026-08-03",
+      "company": "Sift Stack, Inc."
+    },
+    {
+      "date": "2026-08-04",
+      "company": "KKR",
+      "position": "Software Engineer - Investment Systems",
+      "contact": "no-reply@kkr.com"
+    },
+    {
+      "date": "2026-08-05",
+      "company": "Atera"
+    },
+    {
+      "date": "2026-08-06",
+      "company": "Brain Corp"
+    },
+    {
+      "date": "2026-08-06",
+      "company": "Navan"
+    },
+    {
+      "date": "2026-08-07",
+      "company": "Decagon"
+    },
+    {
+      "date": "2026-08-07",
+      "company": "Kustomer"
+    },
+    {
+      "date": "2026-08-07",
+      "company": "Optoinvest"
+    },
+    {
+      "date": "2026-08-07",
+      "company": "Corridor"
+    },
+    {
+      "date": "2026-08-07",
+      "company": "Watershed"
+    }
+  ]
+}
