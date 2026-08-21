@@ -328,7 +328,7 @@ else:
    COPY_DOC_ID = "{COPY_DOC_ID}"
    SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
    COMPANY = "{Company}"
-   OUTPUT_DIR = "/Users/joelchristabreu/Documents/resumes"
+   OUTPUT_DIR = os.path.expanduser("~/Documents/resumes")
    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
    creds = service_account.Credentials.from_service_account_file(
@@ -351,4 +351,4 @@ else:
    ```
 
    Append the local path to the result report:
-   > 💾 Saved to `/Users/joelchristabreu/Documents/resumes/Joelchrist Abreu — Resume — {Company}.pdf`
+   > 💾 Saved to `~/Documents/resumes/Joelchrist Abreu — Resume — {Company}.pdf`

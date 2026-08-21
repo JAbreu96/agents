@@ -196,10 +196,10 @@ class JobTrackerAgent:
             f"Raw job description:\n{raw}"
         )
         import shutil
-        claude_bin = shutil.which("claude") or "/Users/joelchristabreu/.local/bin/claude"
+        claude_bin = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
         # Build env without ANTHROPIC_API_KEY so claude CLI uses its own keychain auth
         cli_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-        cli_env["PATH"] = f"/Users/joelchristabreu/.local/bin:{cli_env.get('PATH', '')}"
+        cli_env["PATH"] = f"{os.path.expanduser('~/.local/bin')}:{cli_env.get('PATH', '')}"
         result = subprocess.run(
             [claude_bin, "-p"],
             input=prompt,
@@ -216,7 +216,7 @@ class JobTrackerAgent:
     def research_company(company: str) -> str:
         """Use the claude CLI with web search to gather company news, Glassdoor reviews, and funding."""
         import subprocess, shutil
-        claude_bin = shutil.which("claude") or "/Users/joelchristabreu/.local/bin/claude"
+        claude_bin = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
         prompt = (
             f"Research the company '{company}' and return a concise notes block with exactly these sections "
             f"(skip any section if no reliable info is found):\n\n"
@@ -229,7 +229,7 @@ class JobTrackerAgent:
             f"- If a section has no reliable data, omit it entirely"
         )
         cli_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-        cli_env["PATH"] = f"/Users/joelchristabreu/.local/bin:{cli_env.get('PATH', '')}"
+        cli_env["PATH"] = f"{os.path.expanduser('~/.local/bin')}:{cli_env.get('PATH', '')}"
         result = subprocess.run(
             [claude_bin, "-p", "--allowedTools", "WebSearch"],
             input=prompt,

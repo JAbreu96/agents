@@ -266,7 +266,7 @@ Follow the resume-review skill exactly:
    COPY_DOC_ID = "{COPY_DOC_ID}"
    SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
    COMPANY = "{Company}"
-   OUTPUT_DIR = "/Users/joelchristabreu/Documents/resumes"
+   OUTPUT_DIR = os.path.expanduser("~/Documents/resumes")
    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
    creds = service_account.Credentials.from_service_account_file(
@@ -288,6 +288,6 @@ Follow the resume-review skill exactly:
    print(f"Saved to {filepath}")
    ```
    Append to the result report:
-   > 💾 Saved to `/Users/joelchristabreu/Documents/resumes/Joelchrist Abreu — Resume — {Company}.pdf`
+   > 💾 Saved to `~/Documents/resumes/Joelchrist Abreu — Resume — {Company}.pdf`
 
 If the match score is **below 65**, skip this step entirely.

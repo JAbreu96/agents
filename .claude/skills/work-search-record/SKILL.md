@@ -26,7 +26,7 @@ This is a government benefits form. It states that DOL **"will check the informa
 This runs **daily**, not just on Sunday, so most runs have nothing to do.
 
 ```bash
-cd /Users/joelchristabreu/Documents/projects/agents/scripts/ws5
+cd scripts/ws5
 python3 build_ws5.py --list-missing
 ```
 
@@ -110,7 +110,7 @@ Edit `scripts/ws5/evidence.json`, appending to `applications`:
 ## Step 5 — Generate the form
 
 ```bash
-cd /Users/joelchristabreu/Documents/projects/agents/scripts/ws5
+cd scripts/ws5
 python3 build_ws5.py --week <WEEK_END>
 ```
 

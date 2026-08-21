@@ -157,7 +157,7 @@ Run the following Python snippet, replacing `{Company}` and `{today}` with actua
 
 ```python
 import sys
-sys.path.insert(0, '/Users/joelchristabreu/Documents/projects/agents')
+sys.path.insert(0, '.')
 from src.jobs_db import update_followup_log
 
 try:
