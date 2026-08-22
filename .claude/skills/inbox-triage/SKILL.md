@@ -139,6 +139,35 @@ request or a rejection, and guessing either way is a silent wrong write.
 
 Only `human_action` and `deadline`. Task list: `My Tasks`.
 
+**A thread only earns a task when the ball is actually in Joel's court.** Conversation
+threads — LinkedIn InMail, recruiter email chains — are where spurious tasks come from,
+because every new message looks like activity. Three tests, in order:
+
+1. **Who spoke last?** If Joel did, he is waiting on them, not the other way round. No
+   task. Chasing a recruiter who owes *him* a reply belongs to the follow-up skills, not
+   here.
+2. **Did they actually ask for something?** A real ask names a thing only Joel can supply:
+   a time, a document, an answer, a decision. *"Let me know which would be your favorite
+   one"*, *"could you please share a few times?"*, *"do you want to reschedule?"* and
+   *"Have you managed to answer the screening questions"* all qualify.
+3. **Is it a closing statement?** Recruiters sign off constantly, and a sign-off is not a
+   request. *"Thanks!"*, *"Perfect - thanks!"*, *"Sounds good!"*, *"Okay cool, I will keep
+   you updated :)"*, *"Will keep you posted regarding your application"* — the exchange is
+   complete and the next move is theirs. No task. The same goes for logistics that have
+   already expired (*"I'll be 3 minutes"*) and for bare attachments (*"Job spec"*).
+
+A thread that fails any test is still worth a tracker note if it moved the process — it
+just does not interrupt.
+
+**Read for a rejection before making a task to read it.** A thread can go quiet because it
+ended badly, and "go and read this" is a wasted errand when the answer is no. Scan the
+message body — LinkedIn's `hit-reply@` and `inmail-hit-reply@` notifications carry the full
+text — for the usual endings: *not moving forward*, *other candidates*, *decided not to
+proceed*, *we've filled the role*, *unfortunately*. If it is a rejection, classify it as
+one: set the row to `Rejected` and stay silent. Only when the text genuinely is not
+available — Indeed's login-gated messages — does the "cannot read" rule apply, and then the
+task must say plainly that the outcome is unknown.
+
 **Check for duplicates first.** Call `mcp__gtasks__list` and skip creation if an existing task already names the same company and refers to the same request. This is what keeps re-runs clean — do not skip it.
 
 Write each task as:
@@ -148,6 +177,31 @@ Write each task as:
 - **Notes** — sender name and address, a verbatim quote of what they asked, any link or portal URL, the tracker status, and whether the company is tracked at all.
 
 The notes are the point: Joel should be able to act without going back to the inbox.
+
+---
+
+## Step 5b — Draft the reply, where a draft is worth having
+
+A task that says "reply to this" still leaves the writing to Joel. Where the reply is
+predictable, leave a Gmail draft beside it with `mcp__gmail_personal__draft_email`, and say
+in the task notes that a draft is waiting.
+
+Draft only for:
+
+- **`recruiter_outreach` scoring 60 or above** — a cold pitch worth answering.
+- **`human_action` where a recruiter asked something answerable from what is already
+  known** — availability from the calendar, a role preference, confirmation of interest.
+
+Do **not** draft when the answer is Joel's alone to give: salary expectations, why he left
+a job, which of three roles he prefers, anything needing judgement about his own history. A
+confident draft of something only he can answer is worse than no draft, because it invites
+sending without thinking.
+
+Follow the `outreach-email` skill's format and constraints — that skill owns the voice, and
+this one should not grow a second copy of it. Lead with the Meta experience, keep it to
+roughly 120-150 words, and never name an employer in a subject line.
+
+Drafts are never sent. Triage does not send email; it leaves work ready for Joel to review.
 
 ---
 
