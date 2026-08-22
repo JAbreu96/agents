@@ -494,6 +494,16 @@ TERMINAL_WIN_STATUSES = {"offer", "accepted"}
 # called ghosted, where 30 days let real ghostings sit as 'awaiting outcome' for a
 # month. The rate treats both as decided, so the shorter threshold makes it
 # move sooner and read slightly pessimistic rather than slightly flattering.
+# A percentage over a handful of rounds is a claim the sample cannot support:
+# two phone screens that went nowhere is a fact, while "0.0%" reads as a verdict
+# on your phone-screen ability. Below this many DECIDED rounds the counts are
+# shown and the percentage is withheld.
+#
+# Deliberately lower than the funnel's RATE_MIN_DENOMINATOR (30): interviews are
+# far rarer than applications, so reusing 30 would hide the rate essentially
+# forever rather than merely until it means something.
+INTERVIEW_RATE_MIN_ROUNDS = 8
+
 GHOSTED_AFTER_DAYS = 15
 
 _INTERVIEWS_DDL = """
@@ -770,12 +780,21 @@ def interview_stats() -> dict:
         entry["total"][r["outcome"]] += 1
         entry[bucket][r["outcome"]] += 1
 
-    def rate(c: dict) -> Optional[float]:
-        # Ghosted rounds are in the denominator: they demonstrably did not advance
-        # you. Leaving them out would compute a rate only over companies polite
-        # enough to send a rejection, which is not the population you interview with.
-        decided = c["advanced"] + c["failed"] + c["ghosted"]
-        return round(100.0 * c["advanced"] / decided, 1) if decided else None
+    def score(c: dict) -> None:
+        """
+        Adds `decided` and `rate` in place.
+
+        Ghosted rounds are in the denominator: they demonstrably did not advance
+        you. Leaving them out would compute a rate only over companies polite
+        enough to send a rejection, which is not the population you interview with.
+
+        `decided` is always reported; `rate` is withheld below
+        INTERVIEW_RATE_MIN_ROUNDS so the caller can say "0 of 2 advanced" rather
+        than print a percentage the sample cannot support.
+        """
+        c["decided"] = c["advanced"] + c["failed"] + c["ghosted"]
+        c["rate"] = (round(100.0 * c["advanced"] / c["decided"], 1)
+                     if c["decided"] >= INTERVIEW_RATE_MIN_ROUNDS else None)
 
     rows = []
     for t in INTERVIEW_TYPES:
@@ -783,7 +802,7 @@ def interview_stats() -> dict:
             continue
         e = by_type[t]
         for scope in ("total", "standalone", "loop"):
-            e[scope]["rate"] = rate(e[scope])
+            score(e[scope])
         rows.append(e)
 
     return {
@@ -795,7 +814,10 @@ def interview_stats() -> dict:
             "ghosted": sum(1 for r in classified if r["outcome"] == "ghosted"),
             "awaiting_outcome": sum(1 for r in classified if r["outcome"] == "awaiting_outcome"),
             "orphaned": sum(1 for r in classified if r["job_orphaned"]),
+            "decided": sum(1 for r in classified
+                           if r["outcome"] in ("advanced", "failed", "ghosted")),
         },
+        "rate_min_rounds": INTERVIEW_RATE_MIN_ROUNDS,
     }
 
 

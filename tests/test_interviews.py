@@ -110,7 +110,8 @@ def test_rate_excludes_awaiting_outcome_from_the_denominator(db):
     sd = next(r for r in db.interview_stats()["by_type"]
               if r["interview_type"] == "system_design")
     assert (sd["total"]["advanced"], sd["total"]["failed"], sd["total"]["awaiting_outcome"]) == (1, 1, 1)
-    assert sd["total"]["rate"] == 50.0
+    # The live round is excluded from the denominator; the other two are in it.
+    assert sd["total"]["decided"] == 2
 
 
 def test_loop_and_standalone_are_reported_separately(db):
@@ -121,9 +122,9 @@ def test_loop_and_standalone_are_reported_separately(db):
 
     b = next(r for r in db.interview_stats()["by_type"]
              if r["interview_type"] == "behavioral")
-    assert b["standalone"]["rate"] == 100.0
-    assert b["loop"]["rate"] == 0.0
-    assert b["total"]["rate"] == 50.0
+    assert (b["standalone"]["advanced"], b["standalone"]["decided"]) == (1, 1)
+    assert (b["loop"]["advanced"], b["loop"]["decided"]) == (0, 1)
+    assert (b["total"]["advanced"], b["total"]["decided"]) == (1, 2)
 
 
 def test_interview_survives_deletion_of_its_job_row(db):
@@ -231,8 +232,10 @@ def test_ghosted_counts_against_the_rate_but_awaiting_outcome_does_not(db):
     tech = next(r for r in db.interview_stats()["by_type"]
                 if r["interview_type"] == "technical")["total"]
     assert (tech["advanced"], tech["ghosted"], tech["awaiting_outcome"]) == (1, 1, 1)
-    # 1 advanced out of (1 advanced + 0 failed + 1 ghosted); the live round is excluded.
-    assert tech["rate"] == 50.0
+    # Denominator is (1 advanced + 0 failed + 1 ghosted). The live round is excluded,
+    # the ghosted one is not. Asserted as `decided` rather than as a percentage,
+    # which is withheld below INTERVIEW_RATE_MIN_ROUNDS.
+    assert tech["decided"] == 2
 
 
 def test_an_earlier_round_is_never_ghosted(db):
@@ -332,3 +335,61 @@ def test_occurred_only_rounds_still_work_unchanged(db):
     db.add_interview(interview_type="technical", occurred_date=_recent(2), **key)
     out = db.classify_interviews()
     assert len(out) == 1 and out[0]["outcome"] == "failed"
+
+
+# --- rate suppression on small samples --------------------------------------
+# "0.0%" from two decided rounds reads as a verdict on your ability. The counts
+# are a fact; the percentage is a claim the sample cannot support.
+
+def _decided_rounds(db, n, advanced_of=0):
+    """n rounds that reached a conclusion, `advanced_of` of them successfully."""
+    for i in range(n):
+        status = "Offer" if i < advanced_of else "Rejected"
+        key = _job(db, f"Co{i}", status, link=f"http://x/{i}")
+        db.add_interview(interview_type="technical", occurred_date=_recent(2), **key)
+
+
+def test_rate_is_withheld_below_the_floor(db):
+    _decided_rounds(db, 2)
+    row = db.interview_stats()["by_type"][0]["total"]
+    assert row["rate"] is None
+    assert row["decided"] == 2      # the counts are still reported
+    assert row["advanced"] == 0
+
+
+def test_rate_appears_once_the_sample_is_big_enough(db):
+    _decided_rounds(db, jobs_db.INTERVIEW_RATE_MIN_ROUNDS, advanced_of=2)
+    row = db.interview_stats()["by_type"][0]["total"]
+    assert row["rate"] is not None
+    assert row["decided"] == jobs_db.INTERVIEW_RATE_MIN_ROUNDS
+
+
+def test_awaiting_rounds_never_count_toward_the_floor(db):
+    """
+    A round with no verdict is not evidence. Letting it count would unlock the
+    percentage using rounds that have decided nothing.
+    """
+    _decided_rounds(db, 2)
+    for i in range(10):
+        key = _job(db, f"Open{i}", "Tracking", link=f"http://open/{i}")
+        db.add_interview(interview_type="technical", occurred_date=_recent(1), **key)
+    row = db.interview_stats()["by_type"][0]["total"]
+    assert row["decided"] == 2
+    assert row["rate"] is None
+
+
+def test_ghosted_rounds_do_count_toward_the_floor(db):
+    """Silence is a decision that was made and never communicated."""
+    for i in range(jobs_db.INTERVIEW_RATE_MIN_ROUNDS):
+        key = _job(db, f"Ghost{i}", "Tracking", link=f"http://g/{i}")
+        db.add_interview(interview_type="technical",
+                         occurred_date=_recent(jobs_db.GHOSTED_AFTER_DAYS + 2), **key)
+    row = db.interview_stats()["by_type"][0]["total"]
+    assert row["ghosted"] == jobs_db.INTERVIEW_RATE_MIN_ROUNDS
+    assert row["rate"] == 0.0
+
+
+def test_totals_report_decided_for_the_headline(db):
+    _decided_rounds(db, 3, advanced_of=1)
+    t = db.interview_stats()["totals"]
+    assert (t["advanced"], t["decided"]) == (1, 3)

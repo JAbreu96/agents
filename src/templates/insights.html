@@ -196,25 +196,37 @@
   </div>
 
   <div class="card">
-    <h2>Round outcomes by type</h2>
+    <h2>How interview rounds turned out</h2>
     <div class="sub">
-      How often a round of each type was followed by another round, versus ended the process.
-      Rate is advanced &divide; (advanced + failed + ghosted). Rounds still awaiting outcome are excluded
-      from the denominator; ghosted ones are not.
+      Every round is judged on one question: <em>did anything follow it?</em> Nothing here is
+      typed in by hand — a rejection email never says which round lost it, so the outcome is
+      worked out from what happened next.
     </div>
+
     {% set totals = stats.totals %}
-    <p class="muted" style="font-size:13px;margin:0 0 12px;">
-      <strong>{{ totals.rounds }}</strong> rounds logged &middot;
-      {{ totals.advanced }} advanced, {{ totals.failed }} failed,
-      {{ totals.ghosted }} ghosted, {{ totals.awaiting_outcome }} awaiting outcome
-      {% if totals.orphaned %} &middot; {{ totals.orphaned }} orphaned{% endif %}
-    </p>
     {% if stats.by_type %}
+    <p style="font-size:13px;margin:0 0 14px;">
+      <strong>{{ totals.rounds }}</strong> round{{ "" if totals.rounds == 1 else "s" }} logged.
+      {% if totals.decided %}
+        <strong>{{ totals.advanced }} of {{ totals.decided }}</strong> that reached a
+        conclusion led to another round.
+      {% else %}
+        None has reached a conclusion yet.
+      {% endif %}
+      {% if totals.awaiting_outcome %}
+        {{ totals.awaiting_outcome }} still too recent to call.
+      {% endif %}
+    </p>
+
     <table>
       <thead>
         <tr>
-          <th>Type</th><th class="num">Advanced</th><th class="num">Failed</th>
-          <th class="num">Ghosted</th><th class="num">Awaiting</th><th class="num">Rate</th>
+          <th>Round type</th>
+          <th class="num">Led to another round</th>
+          <th class="num">Ended in rejection</th>
+          <th class="num">Went silent</th>
+          <th class="num">No result yet</th>
+          <th class="num">Advance rate</th>
         </tr>
       </thead>
       <tbody>
@@ -226,32 +238,57 @@
             <td class="num">{{ row.total.ghosted }}</td>
             <td class="num">{{ row.total.awaiting_outcome }}</td>
             <td class="num">
-              {% if row.total.rate is none %}<span class="muted">&mdash;</span>
-              {% else %}<span class="rate {{ 'good' if row.total.rate >= 50 else 'bad' }}">{{ row.total.rate }}%</span>{% endif %}
+              {% if row.total.rate is not none %}
+                <span class="rate {{ 'good' if row.total.rate >= 50 else 'bad' }}">{{ row.total.rate }}%</span>
+              {% elif row.total.decided %}
+                <span class="muted">{{ row.total.advanced }} of {{ row.total.decided }}</span>
+              {% else %}
+                <span class="muted">&mdash;</span>
+              {% endif %}
             </td>
           </tr>
           {% for scope in ["standalone", "loop"] %}
             {% set c = row[scope] %}
             {% if c.advanced or c.failed or c.ghosted or c.awaiting_outcome %}
               <tr class="sub-row">
-                <td>{{ scope }}</td>
+                <td>{{ "one-off rounds" if scope == "standalone" else "part of an onsite loop" }}</td>
                 <td class="num">{{ c.advanced }}</td>
                 <td class="num">{{ c.failed }}</td>
                 <td class="num">{{ c.ghosted }}</td>
                 <td class="num">{{ c.awaiting_outcome }}</td>
-                <td class="num">{{ "—" if c.rate is none else (c.rate ~ "%") }}</td>
+                <td class="num">
+                  {% if c.rate is not none %}{{ c.rate }}%
+                  {% elif c.decided %}<span class="muted">{{ c.advanced }} of {{ c.decided }}</span>
+                  {% else %}<span class="muted">&mdash;</span>{% endif %}
+                </td>
               </tr>
             {% endif %}
           {% endfor %}
         {% endfor %}
       </tbody>
     </table>
+
     <div class="note">
-      <strong>Ghosted</strong> is derived, never typed: a round with nothing after it,
-      on a job that never closed, that has been silent for {{ ghost_days }}+ days. It counts
-      against the rate because it demonstrably did not advance you — but it is broken out
-      so you can see how much of a low rate is silence rather than rejection, which is
-      often about the company rather than about you.
+      <strong>What the columns mean.</strong>
+      <em>Led to another round</em> — something came after it, or the job ended in an offer;
+      this round did not stop you.
+      <em>Ended in rejection</em> — it was the last round and the job is now rejected, so the
+      process ended here.
+      <em>Went silent</em> — last round, the job never closed, and nothing for
+      {{ ghost_days }}+ days. Nobody said no; they stopped replying. It counts against the
+      rate because it demonstrably did not advance you, but it is shown separately so you can
+      see how much of a low rate is silence rather than rejection — which is usually about the
+      company, not about you.
+      <em>No result yet</em> — the most recent round, still inside the {{ ghost_days }}-day
+      window. Excluded from the rate entirely: counting it as a failure would punish you for
+      a process that simply has not finished.
+    </div>
+    <div class="note">
+      <strong>Advance rate</strong> is how many rounds led to another one, out of those that
+      reached a conclusion. It stays as plain counts until
+      <strong>{{ stats.rate_min_rounds }}</strong> rounds have concluded — a percentage over
+      two or three is a claim the sample cannot support, and "0%" would read as a verdict
+      rather than a small number of calls.
     </div>
     {% else %}
       <p class="empty">No interview rounds logged yet.</p>
