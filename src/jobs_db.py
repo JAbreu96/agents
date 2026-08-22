@@ -1289,3 +1289,151 @@ def recruiter_coverage() -> dict:
         finally:
             conn.close()
     return {"captured": captured, "suspected_uncaptured": len(unlinked), "rows": unlinked}
+
+
+# --- Job-level silence ------------------------------------------------------
+# Silence after a conversation is not the same event as silence after a blind
+# submission. A recruiter who wrote and went quiet DISENGAGED; a portal
+# application nobody answered was never engaged with in the first place, and for
+# an auto-submitted one that is the ordinary outcome rather than a signal.
+# Collapsing the two would make 'ghosted' a synonym for "applied and waiting"
+# and hand the label to the ~354 auto-submitted rows.
+
+# A blind application needs far longer than a live conversation before silence
+# means anything — ATS pipelines routinely take a month.
+NO_RESPONSE_AFTER_DAYS = 30
+
+
+def _relationship_index(conn: sqlite3.Connection) -> dict:
+    """
+    Job keys that carry evidence of a two-way relationship, with the date of the
+    most recent evidence.
+
+    Built as two set queries rather than per-job lookups: classify_job_silence()
+    runs over every open row, and a per-row query would be ~1000 round trips.
+    """
+    index: dict[tuple, str] = {}
+
+    def note(key: tuple, when: str, kind: str, out: dict) -> None:
+        prev = out.get(key)
+        if prev is None or (when or "") > prev[0]:
+            out[key] = ((when or ""), kind)
+
+    staged: dict[tuple, tuple] = {}
+    for r in conn.execute(
+        "SELECT company, date_added, position_title, link, occurred_date FROM interviews"
+    ):
+        note((r["company"], r["date_added"], r["position_title"], r["link"]),
+             r["occurred_date"], "interview", staged)
+
+    for r in conn.execute(
+        "SELECT rj.company, rj.date_added, rj.position_title, rj.link, "
+        "       MAX(rm.occurred_date) AS occurred_date "
+        "FROM recruiter_jobs rj "
+        "JOIN recruiter_messages rm ON rm.recruiter_id = rj.recruiter_id "
+        "GROUP BY rj.company, rj.date_added, rj.position_title, rj.link"
+    ):
+        note((r["company"], r["date_added"], r["position_title"], r["link"]),
+             r["occurred_date"], "recruiter_message", staged)
+
+    index.update(staged)
+    return index
+
+
+def _idle_days(since: str) -> Optional[int]:
+    d = _parse_date(since)
+    return None if d is None else (date.today() - d).days
+
+
+def classify_job_silence() -> list[dict]:
+    """
+    Labels every OPEN job 'ghosted', 'no_response' or 'waiting'.
+
+    Rows with neither a date_applied nor a relationship signal are omitted
+    entirely rather than labelled: a `Tracking` row is not awaiting a reply, and
+    calling it silent would count a decision nobody ever made. That is the rule
+    funnel_stats() already applies to unmeasured stages — an unknown must not be
+    rendered as a zero.
+
+    Derived, never stored. A stored verdict would go stale the moment a reply
+    arrived, and nothing in the write path would clear it.
+    """
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        rel = _relationship_index(conn)
+    finally:
+        conn.close()
+
+    out = []
+    for job in get_all_jobs():
+        status = (job.get("status") or "").strip().lower()
+        if status in TERMINAL_FAIL_STATUSES or status in TERMINAL_WIN_STATUSES:
+            continue
+
+        key = (job.get("company"), job.get("date_added"),
+               job.get("position_title") or "", job.get("link") or "")
+        applied = (job.get("date_applied") or "").strip()
+
+        event_date, signal = rel.get(key, ("", ""))
+        if not signal and status in SCREEN_STATUSES:
+            # A screening status implies a human engaged even where no round was
+            # logged — 8 of the 10 current screens have no `interviews` row.
+            signal = "screening_status"
+
+        if signal:
+            # The clock runs from the newest relationship evidence; fall back to
+            # the application, then to when the row was created.
+            since = event_date or applied or (job.get("date_added") or "")
+            idle = _idle_days(since)
+            state = "ghosted" if idle is not None and idle >= GHOSTED_AFTER_DAYS else "waiting"
+        elif applied:
+            idle = _idle_days(applied)
+            since = applied
+            state = ("no_response" if idle is not None and idle >= NO_RESPONSE_AFTER_DAYS
+                     else "waiting")
+        else:
+            continue  # not awaiting anything
+
+        out.append({
+            "company": job.get("company"),
+            "date_added": job.get("date_added"),
+            "position_title": job.get("position_title"),
+            "link": job.get("link"),
+            "status": job.get("status"),
+            "state": state,
+            # Which test fired, so a classification can be audited rather than
+            # taken on faith.
+            "signal": signal or "application",
+            "since": since,
+            "idle_days": idle,
+            "auto_applied": any(m in (job.get("notes") or "").lower() for m in _AUTO_MARKERS),
+        })
+
+    out.sort(key=lambda r: -(r["idle_days"] or 0))
+    return out
+
+
+def job_silence_stats() -> dict:
+    """
+    Counts per state, split hand vs auto the way funnel_stats() splits sources.
+
+    Auto-submitted rows are included: an unanswered application is unanswered
+    whoever clicked submit. They are counted separately because they behave
+    differently — no contact by construction, and no follow-up action available.
+    """
+    rows = classify_job_silence()
+    out = {"ghosted": {"hand": 0, "auto": 0}, "no_response": {"hand": 0, "auto": 0},
+           "waiting": {"hand": 0, "auto": 0}}
+    for r in rows:
+        out[r["state"]]["auto" if r["auto_applied"] else "hand"] += 1
+    for state in out:
+        out[state]["total"] = out[state]["hand"] + out[state]["auto"]
+    return {
+        "counts": out,
+        "ghosted_rows": [r for r in rows if r["state"] == "ghosted"],
+        "no_response_rows": [r for r in rows if r["state"] == "no_response"],
+        "ghosted_after_days": GHOSTED_AFTER_DAYS,
+        "no_response_after_days": NO_RESPONSE_AFTER_DAYS,
+    }

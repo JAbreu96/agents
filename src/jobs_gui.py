@@ -32,6 +32,7 @@ from src.jobs_db import (  # noqa: E402
     get_interviews,
     get_recruiter_jobs,
     get_recruiters,
+    job_silence_stats,
     recruiter_coverage,
     interview_stats,
     upsert_job,
@@ -267,6 +268,7 @@ def insights_view():
         recruiters=get_recruiters(),
         recruiter_roles=get_recruiter_jobs(),
         coverage=recruiter_coverage(),
+        silence=job_silence_stats(),
     )
 
 
@@ -279,6 +281,12 @@ def interviews_view():
 @app.route("/api/funnel")
 def api_funnel():
     return jsonify(funnel_stats())
+
+
+@app.route("/api/silence")
+def api_silence():
+    """Derived on read — no silence verdict is ever stored."""
+    return jsonify(job_silence_stats())
 
 
 @app.route("/api/recruiters")

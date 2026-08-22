@@ -259,6 +259,82 @@
   </div>
 
   <div class="card">
+    <h2>Silence</h2>
+    <div class="sub">
+      Two different events. <strong>Ghosted</strong> means someone engaged — an interview
+      happened, a recruiter wrote, or the job reached a screening stage — and then went quiet.
+      <strong>No response</strong> means an application was submitted and nobody ever engaged.
+      Both are derived on read; neither is stored.
+    </div>
+
+    <div class="converge">
+      <div class="tile">
+        <div class="label">GHOSTED</div>
+        <div class="value">{{ silence.counts.ghosted.total }}</div>
+        <div class="foot">silent {{ silence.ghosted_after_days }}+ days after contact</div>
+      </div>
+      <div class="tile">
+        <div class="label">NO RESPONSE</div>
+        <div class="value">{{ silence.counts.no_response.total }}</div>
+        <div class="foot">
+          {{ silence.counts.no_response.hand }} hand &middot;
+          {{ silence.counts.no_response.auto }} auto &middot;
+          {{ silence.no_response_after_days }}+ days
+        </div>
+      </div>
+      <div class="tile">
+        <div class="label">WAITING</div>
+        <div class="value">{{ silence.counts.waiting.total }}</div>
+        <div class="foot">still inside the window</div>
+      </div>
+    </div>
+
+    {% if silence.ghosted_rows %}
+    <h2 style="margin:22px 0 4px;font-size:14px;">Ghosted</h2>
+    <table>
+      <thead><tr><th>Company</th><th>Role</th><th>Status</th><th>Signal</th><th class="num">Idle</th></tr></thead>
+      <tbody>
+        {% for r in silence.ghosted_rows %}
+          <tr>
+            <td>{{ r.company }}</td><td>{{ r.position_title }}</td>
+            <td>{{ r.status or "—" }}</td>
+            <td>{{ r.signal.replace("_", " ") }}</td>
+            <td class="num">{{ r.idle_days }}d</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if silence.no_response_rows %}
+    <h2 style="margin:22px 0 4px;font-size:14px;">
+      No response{% if silence.no_response_rows|length > 10 %}
+      &mdash; oldest 10 of {{ silence.no_response_rows|length }}{% endif %}
+    </h2>
+    <table>
+      <thead><tr><th>Company</th><th>Role</th><th>Applied</th><th class="num">Idle</th></tr></thead>
+      <tbody>
+        {% for r in silence.no_response_rows[:10] %}
+          <tr>
+            <td>{{ r.company }}{% if r.auto_applied %} <span class="muted">(auto)</span>{% endif %}</td>
+            <td>{{ r.position_title }}</td>
+            <td>{{ r.since }}</td>
+            <td class="num">{{ r.idle_days }}d</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    <div class="note">
+      A row with no <code>date_applied</code> and no contact is left unclassified rather than
+      called silent — a <code>Tracking</code> row is not awaiting a reply, and counting it would
+      be counting a decision nobody made. <strong>Ghosted starts empty by design</strong>: every
+      job carrying a relationship signal today is younger than the threshold.
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Recruiters</h2>
     <div class="sub">
       Inbound outreach — people who pitched roles Joel never applied to. One recruiter
