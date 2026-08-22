@@ -486,9 +486,15 @@ TERMINAL_FAIL_STATUSES = {"rejected"}
 TERMINAL_WIN_STATUSES = {"offer", "accepted"}
 
 # Silence this long after a round, with nothing following it and no terminal
-# status, is a decision that was made and never communicated. Three weeks can
-# still be a slow loop; a month is not.
-GHOSTED_AFTER_DAYS = 30
+# status, is a decision that was made and never communicated. Two weeks is the
+# point where a process that is still alive normally says something, even if
+# only to apologise for the delay.
+#
+# This trades precision for recall: at 15 days some genuinely slow loops get
+# called ghosted, where 30 days let real ghostings sit as 'in flight' for a
+# month. The rate treats both as decided, so the shorter threshold makes it
+# move sooner and read slightly pessimistic rather than slightly flattering.
+GHOSTED_AFTER_DAYS = 15
 
 _INTERVIEWS_DDL = """
         CREATE TABLE IF NOT EXISTS interviews (
