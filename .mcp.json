@@ -3,7 +3,7 @@
     "job_tracker": {
       "command": "${HOME}/.pyenv/shims/python3",
       "args": [
-        "${HOME}/Documents/projects/agents/mcp_servers/job_tracker/server.py"
+        "${HOME}/projects/agents/mcp_servers/job_tracker/server.py"
       ]
     },
     "gmail_personal": {
@@ -39,7 +39,7 @@
       "args": ["-y", "mcp-gsheets@latest"],
       "env": {
         "GOOGLE_PROJECT_ID": "agents-491602",
-        "GOOGLE_APPLICATION_CREDENTIALS": "${HOME}/Documents/agents-491602-service-account.json"
+        "GOOGLE_APPLICATION_CREDENTIALS": "${HOME}/.config/agents/gcp-service-account.json"
       }
     }
   }

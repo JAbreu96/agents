@@ -25,7 +25,7 @@ SHEET_RANGE = "Sheet1!A2:L"
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "jobs.db")
 SERVICE_ACCOUNT_FILE = os.environ.get(
     "GOOGLE_APPLICATION_CREDENTIALS",
-    os.path.expanduser("~/Documents/agents-491602-service-account.json")
+    os.path.expanduser("~/.config/agents/gcp-service-account.json")
 )
 
 COLUMNS = [

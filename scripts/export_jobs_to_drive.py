@@ -27,7 +27,7 @@ from src.jobs_db import COLUMNS, INTERVIEW_COLUMNS, get_all_jobs, get_interviews
 
 SERVICE_ACCOUNT_FILE = os.environ.get(
     "GOOGLE_APPLICATION_CREDENTIALS",
-    os.path.expanduser("~/Documents/agents-491602-service-account.json")
+    os.path.expanduser("~/.config/agents/gcp-service-account.json")
 )
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
