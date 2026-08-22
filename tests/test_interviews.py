@@ -2,7 +2,7 @@
 Interview-round classification.
 
 The cases that matter here are the ones the real DB cannot exercise yet: onsite
-loops, in-flight processes, offers, and rounds orphaned by a changed job link.
+loops, awaiting-outcome processes, offers, and rounds orphaned by a changed job link.
 """
 
 import importlib
@@ -35,7 +35,7 @@ def _round(db, key, itype, when, loop_id=""):
 def _recent(days_ago=1):
     """
     Dates in these tests must be relative, not absolute. A hard-coded date silently
-    ages past the ghosting threshold and turns an 'in flight' case into a 'ghosted'
+    ages past the ghosting threshold and turns an 'awaiting outcome' case into a 'ghosted'
     one — a test that passes today and fails next month for no code reason.
     """
     from datetime import date, timedelta
@@ -56,15 +56,15 @@ def test_earlier_round_advanced_last_round_failed_on_rejection(db):
     assert out[("technical", "2026-02-08")] == "failed"
 
 
-def test_last_round_of_live_process_is_in_flight_not_failed(db):
+def test_last_round_of_live_process_is_awaiting_outcome_not_failed(db):
     key = _job(db, "Live Co", "Applied")
     when = _recent()
     _round(db, key, "system_design", when)
-    assert _outcomes(db)[("system_design", when)] == "in_flight"
+    assert _outcomes(db)[("system_design", when)] == "awaiting_outcome"
 
     stats = db.interview_stats()
     sd = next(r for r in stats["by_type"] if r["interview_type"] == "system_design")
-    assert sd["total"]["in_flight"] == 1
+    assert sd["total"]["awaiting_outcome"] == 1
     # Excluded from the denominator entirely, not counted as a loss.
     assert sd["total"]["rate"] is None
 
@@ -100,7 +100,7 @@ def test_round_before_a_loop_advanced_and_the_loop_fails(db):
     assert out[("behavioral", "2026-06-10")] == "failed"
 
 
-def test_rate_excludes_in_flight_from_the_denominator(db):
+def test_rate_excludes_awaiting_outcome_from_the_denominator(db):
     won = _job(db, "A Co", "Offer", link="http://a/1")
     lost = _job(db, "B Co", "Rejected", link="http://b/1")
     live = _job(db, "C Co", "Applied", link="http://c/1")
@@ -109,7 +109,7 @@ def test_rate_excludes_in_flight_from_the_denominator(db):
 
     sd = next(r for r in db.interview_stats()["by_type"]
               if r["interview_type"] == "system_design")
-    assert (sd["total"]["advanced"], sd["total"]["failed"], sd["total"]["in_flight"]) == (1, 1, 1)
+    assert (sd["total"]["advanced"], sd["total"]["failed"], sd["total"]["awaiting_outcome"]) == (1, 1, 1)
     assert sd["total"]["rate"] == 50.0
 
 
@@ -140,8 +140,8 @@ def test_interview_survives_deletion_of_its_job_row(db):
     rows = db.classify_interviews()
     assert len(rows) == 1
     assert rows[0]["job_orphaned"] is True
-    # Never guessed at: an orphan is in-flight, not a failure.
-    assert rows[0]["outcome"] == "in_flight"
+    # Never guessed at: an orphan is awaiting outcome, not a failure.
+    assert rows[0]["outcome"] == "awaiting_outcome"
     assert db.interview_stats()["totals"]["orphaned"] == 1
 
 
@@ -193,7 +193,7 @@ def _age_round(db, key, itype, days_ago):
 
 def test_a_silent_round_becomes_ghosted_past_the_threshold(db):
     """
-    A round with nothing after it, on a job that never closed, is only 'in flight'
+    A round with nothing after it, on a job that never closed, is only 'awaiting outcome'
     for so long. Past the silence threshold it is a decision that was made and
     never communicated.
     """
@@ -202,10 +202,10 @@ def test_a_silent_round_becomes_ghosted_past_the_threshold(db):
     assert db.classify_interviews()[0]["outcome"] == "ghosted"
 
 
-def test_a_recent_silent_round_is_still_in_flight(db):
+def test_a_recent_silent_round_is_still_awaiting_outcome(db):
     key = _job(db, "Recent Co", "Applied")
     _age_round(db, key, "technical", jobs_db.GHOSTED_AFTER_DAYS - 1)
-    assert db.classify_interviews()[0]["outcome"] == "in_flight"
+    assert db.classify_interviews()[0]["outcome"] == "awaiting_outcome"
 
 
 def test_an_old_round_that_closed_is_not_ghosted(db):
@@ -220,7 +220,7 @@ def test_an_old_round_that_closed_is_not_ghosted(db):
     assert outcomes["Won Co"] == "advanced"
 
 
-def test_ghosted_counts_against_the_rate_but_in_flight_does_not(db):
+def test_ghosted_counts_against_the_rate_but_awaiting_outcome_does_not(db):
     won = _job(db, "Adv Co", "Offer", link="http://a/1")
     _age_round(db, won, "technical", 1)
     ghost = _job(db, "Ghost Co", "Applied", link="http://g/1")
@@ -230,7 +230,7 @@ def test_ghosted_counts_against_the_rate_but_in_flight_does_not(db):
 
     tech = next(r for r in db.interview_stats()["by_type"]
                 if r["interview_type"] == "technical")["total"]
-    assert (tech["advanced"], tech["ghosted"], tech["in_flight"]) == (1, 1, 1)
+    assert (tech["advanced"], tech["ghosted"], tech["awaiting_outcome"]) == (1, 1, 1)
     # 1 advanced out of (1 advanced + 0 failed + 1 ghosted); the live round is excluded.
     assert tech["rate"] == 50.0
 
@@ -244,3 +244,91 @@ def test_an_earlier_round_is_never_ghosted(db):
     outcomes = {r["interview_type"]: r["outcome"] for r in db.classify_interviews()}
     assert outcomes["phone_screen"] == "advanced"
     assert outcomes["technical"] == "ghosted"
+
+
+# --- scheduled vs occurred --------------------------------------------------
+# `in_flight` used to mean "a round happened, nothing followed yet", which reads
+# as "an interview is coming up" — the opposite of what it meant. It is now
+# `awaiting_outcome`, and the calendar sense has its own representation.
+
+def test_a_booked_round_never_reaches_the_denominator(db):
+    """
+    THE guarantee. An invite is not evidence a round happened; invites get
+    cancelled. Counting one would inflate the denominator with a round that may
+    never occur.
+    """
+    key = _job(db, "Acme", "Phone Screen")
+    db.add_interview(interview_type="phone_screen",
+                     scheduled_date=_recent(-3), **key)  # 3 days from now
+    assert db.classify_interviews() == []
+    assert db.interview_stats()["totals"]["rounds"] == 0
+
+
+def test_a_booked_round_shows_as_upcoming(db):
+    key = _job(db, "Acme", "Phone Screen")
+    db.add_interview(interview_type="phone_screen", scheduled_date=_recent(-3), **key)
+    up = db.upcoming_interviews()
+    assert len(up) == 1
+    assert up[0]["days_away"] == 3
+    assert up[0]["overdue"] is False
+
+
+def test_a_held_round_is_not_upcoming(db):
+    key = _job(db, "Acme", "Phone Screen")
+    db.add_interview(interview_type="phone_screen", occurred_date=_recent(2), **key)
+    assert db.upcoming_interviews() == []
+
+
+def test_a_round_can_be_booked_and_then_held(db):
+    """The normal lifecycle: booked, then it happens, then it counts."""
+    key = _job(db, "Acme", "Phone Screen")
+    iid = db.add_interview(interview_type="phone_screen",
+                           scheduled_date=_recent(1), **key)
+    assert db.classify_interviews() == []
+
+    assert db.mark_interview_occurred(iid) is True
+    assert len(db.classify_interviews()) == 1
+    assert db.upcoming_interviews() == []
+
+
+def test_marking_occurred_defaults_to_the_scheduled_date(db):
+    key = _job(db, "Acme", "Phone Screen")
+    iid = db.add_interview(interview_type="phone_screen",
+                           scheduled_date=_recent(4), **key)
+    db.mark_interview_occurred(iid)
+    assert db.get_interviews()[0]["occurred_date"] == _recent(4)
+
+
+def test_marking_occurred_twice_is_refused(db):
+    key = _job(db, "Acme", "Phone Screen")
+    iid = db.add_interview(interview_type="phone_screen",
+                           scheduled_date=_recent(4), **key)
+    assert db.mark_interview_occurred(iid) is True
+    assert db.mark_interview_occurred(iid) is False
+
+
+def test_a_past_booking_never_marked_held_is_hidden_by_default(db):
+    """
+    Either forgotten paperwork or a call that never happened. Hidden from the
+    normal view, but retrievable — silently dropping it is how the log drifts
+    out of sync with reality.
+    """
+    key = _job(db, "Acme", "Phone Screen")
+    db.add_interview(interview_type="phone_screen", scheduled_date=_recent(9), **key)
+    assert db.upcoming_interviews() == []
+    stale = db.upcoming_interviews(include_past=True)
+    assert len(stale) == 1 and stale[0]["overdue"] is True
+
+
+def test_a_round_with_neither_date_is_rejected(db):
+    key = _job(db, "Acme", "Phone Screen")
+    with pytest.raises(ValueError):
+        db.add_interview(interview_type="phone_screen", **key)
+
+
+def test_occurred_only_rounds_still_work_unchanged(db):
+    """Regression: the existing call signature must keep behaving identically."""
+    key = _job(db, "Acme", "Rejected")
+    db.add_interview(interview_type="technical", occurred_date=_recent(2), **key)
+    out = db.classify_interviews()
+    assert len(out) == 1 and out[0]["outcome"] == "failed"

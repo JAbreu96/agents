@@ -394,7 +394,7 @@ def interview_rates() -> dict:
     another round (or an offer) versus followed by a rejection.
 
     Rate = advanced / (advanced + failed). Rounds whose process is still open are
-    reported as in_flight and left out of the denominator, so a rate is never
+    reported as awaiting_outcome and left out of the denominator, so a rate is never
     dragged down by interviews you simply have not heard back about yet.
     Each type also splits into `standalone` and `loop`: a failed onsite marks
     every round inside it failed, since the rejection never says which round lost
@@ -407,7 +407,7 @@ def interview_rates() -> dict:
 def list_interviews(company: str = "") -> list[dict]:
     """
     Every interview round logged, oldest first, each labelled advanced / failed /
-    in_flight. Pass `company` to narrow to one company (all of its postings).
+    awaiting_outcome. Pass `company` to narrow to one company (all of its postings).
     """
     rows = jobs_db.classify_interviews()
     if company:

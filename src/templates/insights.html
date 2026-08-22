@@ -199,14 +199,14 @@
     <h2>Round outcomes by type</h2>
     <div class="sub">
       How often a round of each type was followed by another round, versus ended the process.
-      Rate is advanced &divide; (advanced + failed + ghosted). Rounds still in flight are excluded
+      Rate is advanced &divide; (advanced + failed + ghosted). Rounds still awaiting outcome are excluded
       from the denominator; ghosted ones are not.
     </div>
     {% set totals = stats.totals %}
     <p class="muted" style="font-size:13px;margin:0 0 12px;">
       <strong>{{ totals.rounds }}</strong> rounds logged &middot;
       {{ totals.advanced }} advanced, {{ totals.failed }} failed,
-      {{ totals.ghosted }} ghosted, {{ totals.in_flight }} in flight
+      {{ totals.ghosted }} ghosted, {{ totals.awaiting_outcome }} awaiting outcome
       {% if totals.orphaned %} &middot; {{ totals.orphaned }} orphaned{% endif %}
     </p>
     {% if stats.by_type %}
@@ -214,7 +214,7 @@
       <thead>
         <tr>
           <th>Type</th><th class="num">Advanced</th><th class="num">Failed</th>
-          <th class="num">Ghosted</th><th class="num">In flight</th><th class="num">Rate</th>
+          <th class="num">Ghosted</th><th class="num">Awaiting</th><th class="num">Rate</th>
         </tr>
       </thead>
       <tbody>
@@ -224,7 +224,7 @@
             <td class="num">{{ row.total.advanced }}</td>
             <td class="num">{{ row.total.failed }}</td>
             <td class="num">{{ row.total.ghosted }}</td>
-            <td class="num">{{ row.total.in_flight }}</td>
+            <td class="num">{{ row.total.awaiting_outcome }}</td>
             <td class="num">
               {% if row.total.rate is none %}<span class="muted">&mdash;</span>
               {% else %}<span class="rate {{ 'good' if row.total.rate >= 50 else 'bad' }}">{{ row.total.rate }}%</span>{% endif %}
@@ -232,13 +232,13 @@
           </tr>
           {% for scope in ["standalone", "loop"] %}
             {% set c = row[scope] %}
-            {% if c.advanced or c.failed or c.ghosted or c.in_flight %}
+            {% if c.advanced or c.failed or c.ghosted or c.awaiting_outcome %}
               <tr class="sub-row">
                 <td>{{ scope }}</td>
                 <td class="num">{{ c.advanced }}</td>
                 <td class="num">{{ c.failed }}</td>
                 <td class="num">{{ c.ghosted }}</td>
-                <td class="num">{{ c.in_flight }}</td>
+                <td class="num">{{ c.awaiting_outcome }}</td>
                 <td class="num">{{ "—" if c.rate is none else (c.rate ~ "%") }}</td>
               </tr>
             {% endif %}
@@ -255,6 +255,43 @@
     </div>
     {% else %}
       <p class="empty">No interview rounds logged yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Coming up</h2>
+    <div class="sub">
+      Interviews that are on the calendar but have not happened yet. A booking is not
+      evidence a round took place — invites get cancelled — so none of these counts toward
+      any rate until it is marked as held.
+    </div>
+    {% if upcoming %}
+    <table>
+      <thead><tr><th>Company</th><th>Role</th><th>Type</th><th>Date</th><th class="num">When</th></tr></thead>
+      <tbody>
+        {% for u in upcoming %}
+          <tr>
+            <td>{{ u.company }}</td>
+            <td>{{ u.position_title }}</td>
+            <td>{{ (u.type_label or u.interview_type).replace("_", " ") }}</td>
+            <td>{{ u.scheduled_date }}</td>
+            <td class="num">
+              {% if u.overdue %}<span class="rate bad">{{ -u.days_away }}d overdue</span>
+              {% elif u.days_away == 0 %}today
+              {% else %}in {{ u.days_away }}d{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="note">
+      A booking whose date has passed with no outcome recorded shows as
+      <strong>overdue</strong> rather than disappearing — either it happened and was never
+      logged, or it never happened. Both are worth seeing; silently hiding it is how the
+      interview log drifts away from reality.
+    </div>
+    {% else %}
+    <p class="muted" style="font-size:13px;margin:0;">Nothing booked.</p>
     {% endif %}
   </div>
 

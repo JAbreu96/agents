@@ -491,7 +491,7 @@ TERMINAL_WIN_STATUSES = {"offer", "accepted"}
 # only to apologise for the delay.
 #
 # This trades precision for recall: at 15 days some genuinely slow loops get
-# called ghosted, where 30 days let real ghostings sit as 'in flight' for a
+# called ghosted, where 30 days let real ghostings sit as 'awaiting outcome' for a
 # month. The rate treats both as decided, so the shorter threshold makes it
 # move sooner and read slightly pessimistic rather than slightly flattering.
 GHOSTED_AFTER_DAYS = 15
@@ -506,7 +506,8 @@ _INTERVIEWS_DDL = """
             interview_type TEXT NOT NULL,
             type_label     TEXT,
             loop_id        TEXT,
-            occurred_date  TEXT NOT NULL,
+            scheduled_date TEXT,
+            occurred_date  TEXT,
             self_rating    INTEGER,
             notes          TEXT
         )
@@ -525,6 +526,11 @@ def _ensure_interviews_schema(conn: sqlite3.Connection) -> None:
     be re-fetched from anywhere, so they survive by construction.
     """
     conn.execute(_INTERVIEWS_DDL)
+    try:
+        conn.execute("ALTER TABLE interviews ADD COLUMN scheduled_date TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    _migrate_interviews_nullable_occurred(conn)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_interviews_job "
         "ON interviews (company, date_added, position_title, link)"
@@ -533,23 +539,70 @@ def _ensure_interviews_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_interviews_loop ON interviews (loop_id)")
 
 
-def add_interview(company: str, date_added: str, position_title: str, link: str,
-                  interview_type: str, occurred_date: str, type_label: str = "",
-                  loop_id: str = "", self_rating: Optional[int] = None,
-                  notes: str = "") -> int:
+def _migrate_interviews_nullable_occurred(conn: sqlite3.Connection) -> None:
     """
-    Records one interview round that HAPPENED. Returns the new row id.
+    Drops NOT NULL from interviews.occurred_date on databases created before
+    scheduled rounds existed.
 
-    `occurred_date` is deliberately not "scheduled date" — advancement is derived
-    from which rounds took place, so a cancelled or rescheduled invite that never
-    happened must never reach this table or it inflates the denominator.
+    CREATE TABLE IF NOT EXISTS does not alter an existing table and SQLite cannot
+    ALTER a column constraint, so the table has to be rebuilt. Caught only
+    against the live DB — every test builds a fresh one from the current DDL and
+    so never sees the old constraint.
+
+    No-op once migrated.
+    """
+    cols = conn.execute("PRAGMA table_info(interviews)").fetchall()
+    if not cols:
+        return
+    # row[1] = name, row[3] = notnull
+    if not any(row[1] == "occurred_date" and row[3] for row in cols):
+        return
+
+    conn.execute(_INTERVIEWS_DDL.replace("interviews", "interviews_migrated"))
+    conn.execute(
+        "INSERT INTO interviews_migrated (id, company, date_added, position_title, link, "
+        " interview_type, type_label, loop_id, scheduled_date, occurred_date, self_rating, notes) "
+        "SELECT id, company, date_added, position_title, link, interview_type, type_label, "
+        "       loop_id, scheduled_date, occurred_date, self_rating, notes FROM interviews"
+    )
+    conn.execute("DROP TABLE interviews")
+    conn.execute("ALTER TABLE interviews_migrated RENAME TO interviews")
+    conn.commit()
+
+
+def add_interview(company: str, date_added: str, position_title: str, link: str,
+                  interview_type: str, occurred_date: str = "", type_label: str = "",
+                  loop_id: str = "", self_rating: Optional[int] = None,
+                  notes: str = "", scheduled_date: str = "") -> int:
+    """
+    Records one interview round — booked, held, or both. Returns the new row id.
+
+    The two dates mean different things and only one of them can carry weight:
+
+      * `scheduled_date` — it is on the calendar. Says nothing about whether it
+        happens; invites get cancelled and rescheduled constantly.
+      * `occurred_date`  — it took place. ONLY this makes a round count toward
+        any outcome or rate.
+
+    A row with a scheduled_date and no occurred_date is upcoming, and
+    classify_interviews() skips it entirely: an invite is not evidence a round
+    happened, and counting it would inflate the denominator with rounds that may
+    never occur. When it does happen, set occurred_date via
+    mark_interview_occurred().
+
+    At least one date is required — a round that is neither booked nor held is
+    not an event.
     """
     if interview_type not in INTERVIEW_TYPES:
         raise ValueError(
             f"Unknown interview_type '{interview_type}'. One of: {', '.join(INTERVIEW_TYPES)}"
         )
-    if not occurred_date or not occurred_date.strip():
-        raise ValueError("occurred_date is required — only rounds that happened are logged.")
+    occurred_date = (occurred_date or "").strip()
+    scheduled_date = (scheduled_date or "").strip()
+    if not occurred_date and not scheduled_date:
+        raise ValueError(
+            "one of occurred_date (it happened) or scheduled_date (it is booked) is required."
+        )
     if self_rating is not None and not (1 <= int(self_rating) <= 5):
         raise ValueError("self_rating must be between 1 and 5, or None.")
 
@@ -557,10 +610,12 @@ def add_interview(company: str, date_added: str, position_title: str, link: str,
     try:
         cur = conn.execute(
             "INSERT INTO interviews (company, date_added, position_title, link, "
-            "interview_type, type_label, loop_id, occurred_date, self_rating, notes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "interview_type, type_label, loop_id, scheduled_date, occurred_date, "
+            "self_rating, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (company, date_added, position_title, link, interview_type,
-             type_label or None, loop_id or None, occurred_date.strip(),
+             type_label or None, loop_id or None, scheduled_date or None,
+             occurred_date or None,
              int(self_rating) if self_rating is not None else None, notes or None),
         )
         conn.commit()
@@ -603,7 +658,9 @@ def get_interviews(company: str = "", date_added: str = "", position_title: str 
                     clauses.append(f"{col} = ?")
                     params.append(val)
             query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY occurred_date ASC, id ASC"
+        # COALESCE so an upcoming round (no occurred_date) sorts by when it is
+        # booked instead of clustering at the top as a NULL.
+        query += " ORDER BY COALESCE(occurred_date, scheduled_date) ASC, id ASC"
         return [dict(r) for r in conn.execute(query, params).fetchall()]
     finally:
         conn.close()
@@ -618,7 +675,7 @@ def _unit_key(row: dict) -> tuple:
 
 def classify_interviews() -> list[dict]:
     """
-    Labels every interview round 'advanced', 'failed', or 'in_flight'.
+    Labels every interview round 'advanced', 'failed', or 'awaiting_outcome'.
 
     No verdict is ever stored, because for most rounds it is not observable — a
     rejection email after a four-round loop does not say which round lost it.
@@ -629,14 +686,17 @@ def classify_interviews() -> list[dict]:
       * last unit, job status Rejected    -> failed
       * last unit, job status Offer/Accepted -> advanced
       * last unit, job active, silent 30d+ -> ghosted (counts against the rate)
-      * last unit, job still active       -> in_flight (excluded from the rate)
+      * last unit, job still active       -> awaiting_outcome (excluded from the rate)
 
     Loops are atomic: rounds sharing a loop_id resolve together and every round
     in the loop inherits the loop's outcome. Ordering rounds inside a same-day
     onsite by date would otherwise mark the earlier ones 'advanced' for merely
     having siblings and pin the whole loop's failure on whichever one sorted last.
     """
-    rows = get_interviews()
+    # A booked-but-not-held round is not evidence of anything. Including it
+    # would put rounds that may never occur into the denominator, which is the
+    # exact error `occurred_date` exists to prevent.
+    rows = [r for r in get_interviews() if (r.get("occurred_date") or "").strip()]
     if not rows:
         return []
 
@@ -665,7 +725,7 @@ def classify_interviews() -> list[dict]:
             if i < len(ordered) - 1:
                 outcome = "advanced"
             elif status is None:
-                outcome = "in_flight"   # job row gone (link changed?) — never guess
+                outcome = "awaiting_outcome"   # job row gone (link changed?) — never guess
             elif status in TERMINAL_FAIL_STATUSES:
                 outcome = "failed"
             elif status in TERMINAL_WIN_STATUSES:
@@ -675,7 +735,7 @@ def classify_interviews() -> list[dict]:
                 # silence threshold that is a ghosting, not an open process.
                 last_seen = max(_parse_date(r["occurred_date"]) or date.min for r in unit)
                 idle = (date.today() - last_seen).days if last_seen != date.min else 0
-                outcome = "ghosted" if idle >= GHOSTED_AFTER_DAYS else "in_flight"
+                outcome = "ghosted" if idle >= GHOSTED_AFTER_DAYS else "awaiting_outcome"
             for r in unit:
                 out.append({**r, "outcome": outcome, "job_orphaned": status is None})
     return out
@@ -686,15 +746,19 @@ def interview_stats() -> dict:
     Round outcomes per interview type. The single source of this computation —
     the GUI view and the MCP tool both call it so the two can never disagree.
 
-    Rate = advanced / (advanced + failed). In-flight rounds are excluded from the
-    denominator entirely: every job's most recent round has no successor yet, so
-    counting those as failures would drag every rate down and hit whichever types
-    you interviewed for most recently the hardest.
+    Rate = advanced / (advanced + failed + ghosted). Only awaiting_outcome rounds
+    are excluded from the denominator: every job's most recent round has no
+    successor yet, so counting those as failures would drag every rate down and
+    hit whichever types you interviewed for most recently the hardest. A ghosted
+    round IS counted — it demonstrably did not advance you.
+
+    Booked-but-not-held rounds never reach this at all; classify_interviews()
+    drops them before any of it runs.
     """
     classified = classify_interviews()
 
     def blank() -> dict:
-        return {"advanced": 0, "failed": 0, "ghosted": 0, "in_flight": 0}
+        return {"advanced": 0, "failed": 0, "ghosted": 0, "awaiting_outcome": 0}
 
     by_type: dict[str, dict] = {}
     for r in classified:
@@ -729,7 +793,7 @@ def interview_stats() -> dict:
             "advanced": sum(1 for r in classified if r["outcome"] == "advanced"),
             "failed": sum(1 for r in classified if r["outcome"] == "failed"),
             "ghosted": sum(1 for r in classified if r["outcome"] == "ghosted"),
-            "in_flight": sum(1 for r in classified if r["outcome"] == "in_flight"),
+            "awaiting_outcome": sum(1 for r in classified if r["outcome"] == "awaiting_outcome"),
             "orphaned": sum(1 for r in classified if r["job_orphaned"]),
         },
     }
@@ -1437,3 +1501,69 @@ def job_silence_stats() -> dict:
         "ghosted_after_days": GHOSTED_AFTER_DAYS,
         "no_response_after_days": NO_RESPONSE_AFTER_DAYS,
     }
+
+
+def upcoming_interviews(include_past: bool = False) -> list[dict]:
+    """
+    Rounds that are booked but have not happened yet, soonest first.
+
+    This is what "in flight" means in ordinary speech, and until now it had
+    nowhere to live: two real calls were sitting in free-text `notes` where no
+    query could see them.
+
+    A scheduled round that is already in the past and still has no
+    `occurred_date` is either forgotten paperwork or a call that never happened.
+    `include_past=True` surfaces those, because silently hiding them is how the
+    interview log drifts out of sync with reality.
+    """
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT * FROM interviews "
+            "WHERE COALESCE(scheduled_date, '') <> '' AND COALESCE(occurred_date, '') = '' "
+            "ORDER BY scheduled_date ASC, id ASC"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    today = date.today()
+    out = []
+    for r in rows:
+        row = dict(r)
+        when = _parse_date(row["scheduled_date"])
+        row["days_away"] = (when - today).days if when else None
+        row["overdue"] = row["days_away"] is not None and row["days_away"] < 0
+        if row["overdue"] and not include_past:
+            continue
+        out.append(row)
+    return out
+
+
+def mark_interview_occurred(interview_id: int, occurred_date: str = "") -> bool:
+    """
+    Promotes a booked round to one that happened. Returns False if the id is
+    unknown or the round already has an occurred_date.
+
+    Defaults to the scheduled date, since the overwhelmingly common case is a
+    call that ran when it was booked to run.
+    """
+    conn = _connect()
+    if not conn:
+        return False
+    try:
+        row = conn.execute(
+            "SELECT scheduled_date, occurred_date FROM interviews WHERE id = ?",
+            (interview_id,),
+        ).fetchone()
+        if not row or (row["occurred_date"] or "").strip():
+            return False
+        when = (occurred_date or "").strip() or (row["scheduled_date"] or "").strip()
+        if not when:
+            return False
+        conn.execute("UPDATE interviews SET occurred_date = ? WHERE id = ?", (when, interview_id))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
