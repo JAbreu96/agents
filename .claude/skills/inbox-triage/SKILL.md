@@ -113,6 +113,21 @@ is by definition untracked: status `Tracking` (Joel has not applied), the recrui
 name and address in `contacts`, and a note saying it came from inbound outreach. If the
 same firm pitches again, add a row for the new role — do not overwrite the old one.
 
+Score the role before deciding whether it is worth Joel's attention, and put
+`Match Score: X/100` plus a one-line rationale and the top gaps in the note:
+
+- **Stack** — TypeScript, React, Node.js, GraphQL, JavaScript, Hack/PHP are the core;
+  Python, SQL, AWS, Docker, Mongo, Postgres, Java are exposure only.
+- **Seniority** — 2-5 years fits. A hard 5+ requirement is a real miss, not a stretch.
+- **Shape** — AI and product engineering score high; infra, ML research, embedded and
+  data-engineering score low.
+- **Location** — NYC or remote preferred; onsite anywhere else is a flag.
+
+**60 or above earns a task**; below that the row is written and nothing is surfaced. This
+is what keeps the flood quiet without discarding it: an Alibaba Cloud DevOps or embedded
+firmware pitch scores in the teens and stays silent, while a genuinely matched inbound
+role still reaches Joel. Anything already tracked is not re-scored.
+
 **Never advance a status on a message you cannot read.** Indeed and some ATS portals
 send "you have a new message" with the body behind a login. That is a `human_action`
 worth a task, but the row stays where it is: the hidden text may be an interview
