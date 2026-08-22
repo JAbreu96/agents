@@ -66,6 +66,8 @@ def sync():
     conn.row_factory = sqlite3.Row
     init_db(conn)
 
+    key_cols = jobs_db.KEY_COLUMNS
+
     synced = 0
     skipped = 0
     for row in rows:
@@ -74,10 +76,17 @@ def sync():
         if not company:
             skipped += 1
             continue
+        key = [vals[COLUMNS.index(c)] for c in key_cols]
+        # `archived` is on the table but not in COLUMNS, and INSERT OR REPLACE is
+        # delete-then-insert — so writing only COLUMNS resets it to DEFAULT 0 and
+        # silently un-archives every row the sheet still carries. Carry the
+        # existing value forward instead, exactly as jobs_db.upsert_job does.
         conn.execute(f"""
-            INSERT OR REPLACE INTO jobs ({", ".join(COLUMNS)})
-            VALUES ({", ".join(["?"] * len(COLUMNS))})
-        """, vals)
+            INSERT OR REPLACE INTO jobs ({", ".join(COLUMNS)}, archived)
+            VALUES ({", ".join(["?"] * len(COLUMNS))},
+                    COALESCE((SELECT archived FROM jobs
+                              WHERE {" AND ".join(f"{c} = ?" for c in key_cols)}), 0))
+        """, vals + key)
         synced += 1
 
     conn.commit()
