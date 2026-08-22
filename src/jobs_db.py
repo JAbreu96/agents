@@ -94,6 +94,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_company ON jobs (company)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_archived ON jobs (archived)")
     _ensure_interviews_schema(conn)
+    _ensure_recruiters_schema(conn)
     conn.execute(_META_DDL)
 
 
@@ -866,3 +867,330 @@ def funnel_stats() -> dict:
                 prev = None if stage["count"] is None else stage["count"]
 
     return {"sources": data, "rate_min_denominator": RATE_MIN_DENOMINATOR}
+
+
+# --- Recruiters -------------------------------------------------------------
+# A recruiter pitches N roles, so the relationship is one-to-many and the roles
+# are ordinary job rows. What `jobs` cannot hold is the recruiter themselves:
+# sync_jobs_to_sqlite.py writes only the 12 sheet COLUMNS, so any extra column
+# on `jobs` is reset by a sync. Linkage therefore lives on the recruiter side.
+
+_RECRUITERS_DDL = """
+        CREATE TABLE IF NOT EXISTS recruiters (
+            id            INTEGER PRIMARY KEY,
+            source        TEXT NOT NULL,
+            identity      TEXT NOT NULL,
+            email         TEXT,
+            name          TEXT,
+            agency        TEXT,
+            agency_domain TEXT,
+            first_seen    TEXT NOT NULL,
+            last_seen     TEXT,
+            notes         TEXT,
+            UNIQUE (source, identity)
+        )
+"""
+
+_RECRUITER_JOBS_DDL = """
+        CREATE TABLE IF NOT EXISTS recruiter_jobs (
+            id             INTEGER PRIMARY KEY,
+            recruiter_id   INTEGER NOT NULL,
+            company        TEXT NOT NULL,
+            date_added     TEXT NOT NULL DEFAULT '',
+            position_title TEXT NOT NULL DEFAULT '',
+            link           TEXT NOT NULL DEFAULT '',
+            sourced_date   TEXT NOT NULL,
+            account        TEXT,
+            message_id     TEXT,
+            UNIQUE (recruiter_id, company, date_added, position_title, link)
+        )
+"""
+
+_RECRUITER_MESSAGES_DDL = """
+        CREATE TABLE IF NOT EXISTS recruiter_messages (
+            id            INTEGER PRIMARY KEY,
+            recruiter_id  INTEGER NOT NULL,
+            direction     TEXT NOT NULL,
+            occurred_date TEXT NOT NULL,
+            subject       TEXT,
+            account       TEXT NOT NULL DEFAULT 'primary',
+            message_id    TEXT,
+            thread_id     TEXT,
+            UNIQUE (account, message_id)
+        )
+"""
+
+# The one-way Drive export. jobs.db is gitignored and recruiter identity cannot
+# be reconstructed from the Sheet, so it needs a copy off this disk, same as
+# interviews.
+RECRUITER_COLUMNS = [
+    "source", "identity", "name", "agency", "email", "agency_domain",
+    "first_seen", "last_seen", "role_count", "reply_count", "notes",
+]
+
+RECRUITER_JOB_COLUMNS = [
+    "recruiter_identity", "recruiter_name", "recruiter_agency",
+    "company", "position_title", "sourced_date", "link", "job_status",
+]
+
+RECRUITER_SOURCES = ("email", "linkedin")
+MESSAGE_DIRECTIONS = ("inbound", "reply")
+
+# Gmail ids are per-account, so the primary and alt inboxes occupy separate id
+# spaces. Uniqueness is the pair; a bare message_id would reject a legitimate
+# alt-inbox message that happened to collide with a primary one.
+MESSAGE_ACCOUNTS = ("primary", "alt")
+
+
+def _ensure_recruiters_schema(conn: sqlite3.Connection) -> None:
+    """
+    Same rule as interviews: the job key is copied in, never referenced.
+
+    _migrate_key() rebuilds `jobs` wholesale and sync_jobs_to_sqlite.py writes
+    with INSERT OR REPLACE (delete-then-insert). Both reassign every rowid, so a
+    rowid foreign key would dangle and ON DELETE CASCADE would empty these tables
+    on a routine sync.
+    """
+    conn.execute(_RECRUITERS_DDL)
+    conn.execute(_RECRUITER_JOBS_DDL)
+    conn.execute(_RECRUITER_MESSAGES_DDL)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recruiter_jobs_job "
+        "ON recruiter_jobs (company, date_added, position_title, link)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recruiter_jobs_recruiter "
+        "ON recruiter_jobs (recruiter_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recruiter_messages_recruiter "
+        "ON recruiter_messages (recruiter_id)"
+    )
+
+
+def _slugify(value: str) -> str:
+    """Lowercase, alphanumerics and single hyphens. Empty input yields 'role'."""
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+    return slug or "role"
+
+
+def recruiter_link(source: str, identity: str, position_title: str) -> str:
+    """
+    The synthetic `link` for a recruiter-sourced role.
+
+    Recruiter roles have no posting URL, but `link` is part of the jobs primary
+    key, so two roles pitched by one recruiter on one day would collide — which
+    is exactly how one row came to be titled
+    'Frontend Engineer / Cloud Backend Engineer'.
+
+    Keying on (source, identity) rather than the raw address matters for
+    LinkedIn: InMail arrives from the shared relay inmail-hit-reply@linkedin.com,
+    so an address-keyed link would collapse every LinkedIn recruiter's roles
+    together. Deterministic by construction, so re-processing the same message
+    updates rather than duplicates.
+    """
+    return f"recruiter:{source}:{identity}/{_slugify(position_title)}"
+
+
+def upsert_recruiter(source: str, identity: str, name: str = "", agency: str = "",
+                     email: str = "", agency_domain: str = "", notes: str = "",
+                     seen_date: str = "") -> int:
+    """
+    Creates or updates one recruiter, returning its id.
+
+    Identity is (source, identity) — an address for mail, a profile slug for
+    LinkedIn — because InMail has no per-recruiter sender address. `email` is
+    stored separately and may be blank for that reason.
+
+    Only ever widens what is known: a later message with no `agency` must not
+    erase an agency learned earlier.
+    """
+    if source not in RECRUITER_SOURCES:
+        raise ValueError(
+            f"Unknown recruiter source '{source}'. One of: {', '.join(RECRUITER_SOURCES)}"
+        )
+    if not identity or not identity.strip():
+        raise ValueError("identity is required — it is half the recruiter key.")
+
+    identity = identity.strip()
+    seen = seen_date.strip() if seen_date and seen_date.strip() else ""
+    today = seen or date.today().isoformat()
+
+    conn = _connect(create=True)
+    try:
+        row = conn.execute(
+            "SELECT id FROM recruiters WHERE source = ? AND identity = ?",
+            (source, identity),
+        ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE recruiters SET "
+                "  name = COALESCE(NULLIF(?, ''), name), "
+                "  agency = COALESCE(NULLIF(?, ''), agency), "
+                "  email = COALESCE(NULLIF(?, ''), email), "
+                "  agency_domain = COALESCE(NULLIF(?, ''), agency_domain), "
+                "  notes = COALESCE(NULLIF(?, ''), notes), "
+                "  last_seen = MAX(COALESCE(last_seen, ''), ?) "
+                "WHERE id = ?",
+                (name, agency, email, agency_domain, notes, seen, row["id"]),
+            )
+            conn.commit()
+            return row["id"]
+
+        cur = conn.execute(
+            "INSERT INTO recruiters (source, identity, email, name, agency, "
+            "agency_domain, first_seen, last_seen, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (source, identity, email or None, name or None, agency or None,
+             agency_domain or None, today, today, notes or None),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def link_recruiter_job(recruiter_id: int, company: str, date_added: str,
+                       position_title: str, link: str, sourced_date: str = "",
+                       account: str = "", message_id: str = "") -> int:
+    """
+    Records that this recruiter sourced this job row. Returns the link row id.
+
+    Idempotent on the full (recruiter, job key) tuple, so re-processing a message
+    re-links rather than duplicating.
+    """
+    sourced = sourced_date.strip() if sourced_date and sourced_date.strip() \
+        else date.today().isoformat()
+    conn = _connect(create=True)
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO recruiter_jobs (recruiter_id, company, date_added, "
+            "position_title, link, sourced_date, account, message_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (recruiter_id, company, date_added, position_title, link, sourced,
+             account or None, message_id or None),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id FROM recruiter_jobs WHERE recruiter_id = ? AND company = ? "
+            "AND date_added = ? AND position_title = ? AND link = ?",
+            (recruiter_id, company, date_added, position_title, link),
+        ).fetchone()
+        return row["id"] if row else 0
+    finally:
+        conn.close()
+
+
+def record_recruiter_message(recruiter_id: int, direction: str, occurred_date: str,
+                             subject: str = "", account: str = "primary",
+                             message_id: str = "", thread_id: str = "") -> int:
+    """
+    Records one message to or from a recruiter. Returns the row id.
+
+    Idempotent on (account, message_id) so a re-run records nothing new.
+    """
+    if direction not in MESSAGE_DIRECTIONS:
+        raise ValueError(
+            f"direction must be one of: {', '.join(MESSAGE_DIRECTIONS)}"
+        )
+    if not occurred_date or not occurred_date.strip():
+        raise ValueError("occurred_date is required.")
+    account = account or "primary"
+
+    conn = _connect(create=True)
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO recruiter_messages (recruiter_id, direction, "
+            "occurred_date, subject, account, message_id, thread_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (recruiter_id, direction, occurred_date.strip(), subject or None,
+             account, message_id or None, thread_id or None),
+        )
+        conn.execute(
+            "UPDATE recruiters SET last_seen = MAX(COALESCE(last_seen, ''), ?) WHERE id = ?",
+            (occurred_date.strip(), recruiter_id),
+        )
+        conn.commit()
+        if message_id:
+            row = conn.execute(
+                "SELECT id FROM recruiter_messages WHERE account = ? AND message_id = ?",
+                (account, message_id),
+            ).fetchone()
+            return row["id"] if row else 0
+        return conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+    finally:
+        conn.close()
+
+
+def get_recruiters() -> list[dict]:
+    """
+    Every recruiter with their role count and last contact, most recent first.
+
+    The role count comes from recruiter_jobs, not from `jobs`, so a role whose
+    job row was deleted still shows the recruiter as known.
+    """
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT r.*, "
+            "  (SELECT COUNT(*) FROM recruiter_jobs j WHERE j.recruiter_id = r.id) "
+            "    AS role_count, "
+            "  (SELECT COUNT(*) FROM recruiter_messages m "
+            "    WHERE m.recruiter_id = r.id AND m.direction = 'reply') AS reply_count "
+            "FROM recruiters r "
+            "ORDER BY COALESCE(r.last_seen, r.first_seen) DESC, r.id DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_recruiter_jobs(recruiter_id: Optional[int] = None) -> list[dict]:
+    """
+    Recruiter-sourced roles, newest first, joined to the live job row.
+
+    LEFT JOIN on purpose: a link whose job row has since been deleted or re-keyed
+    still lists, with nulls for the job columns. Silently dropping it would hide
+    exactly the breakage worth seeing.
+    """
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        query = (
+            "SELECT rj.*, r.name AS recruiter_name, r.agency AS recruiter_agency, "
+            "       r.source AS recruiter_source, r.identity AS recruiter_identity, "
+            "       j.status AS job_status, j.notes AS job_notes "
+            "FROM recruiter_jobs rj "
+            "JOIN recruiters r ON r.id = rj.recruiter_id "
+            "LEFT JOIN jobs j ON j.company = rj.company AND j.date_added = rj.date_added "
+            "  AND j.position_title = rj.position_title AND j.link = rj.link"
+        )
+        params: list = []
+        if recruiter_id is not None:
+            query += " WHERE rj.recruiter_id = ?"
+            params.append(recruiter_id)
+        query += " ORDER BY rj.sourced_date DESC, rj.id DESC"
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+    finally:
+        conn.close()
+
+
+def get_recruiter_messages(recruiter_id: Optional[int] = None) -> list[dict]:
+    """Messages to and from recruiters, oldest first."""
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        query = "SELECT * FROM recruiter_messages"
+        params: list = []
+        if recruiter_id is not None:
+            query += " WHERE recruiter_id = ?"
+            params.append(recruiter_id)
+        query += " ORDER BY occurred_date ASC, id ASC"
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+    finally:
+        conn.close()

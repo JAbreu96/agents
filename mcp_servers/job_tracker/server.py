@@ -429,5 +429,157 @@ def list_interviews(company: str = "") -> list[dict]:
     ]
 
 
+# --- Recruiters -------------------------------------------------------------
+# A recruiter pitches N roles. record_recruiter_outreach is the single write
+# entry point inbox-triage calls; everything else here reads.
+
+@mcp.tool()
+def list_recruiters() -> list[dict]:
+    """
+    Every recruiter who has sent inbound outreach, most recently heard from first.
+
+    `role_count` is how many roles they have pitched; `reply_count` is how many
+    times Joel answered.
+    """
+    return [
+        {
+            "name": r["name"],
+            "agency": r["agency"],
+            "source": r["source"],
+            "identity": r["identity"],
+            "email": r["email"],
+            "roles": r["role_count"],
+            "replies": r["reply_count"],
+            "first_seen": r["first_seen"],
+            "last_seen": r["last_seen"],
+        }
+        for r in jobs_db.get_recruiters()
+    ]
+
+
+@mcp.tool()
+def recruiter_roles(identity: str = "") -> list[dict]:
+    """
+    Roles sourced by recruiters, newest first.
+
+    Pass `identity` (an email address, or a LinkedIn profile slug) to narrow to
+    one recruiter. `job_status` is None when the job row has since been deleted
+    or re-keyed — that is real breakage, so it is shown rather than hidden.
+    """
+    rows = jobs_db.get_recruiter_jobs()
+    if identity:
+        needle = identity.strip().lower()
+        rows = [r for r in rows if needle == (r["recruiter_identity"] or "").lower()]
+    return [
+        {
+            "recruiter": r["recruiter_name"],
+            "agency": r["recruiter_agency"],
+            "identity": r["recruiter_identity"],
+            "company": r["company"],
+            "position_title": r["position_title"],
+            "sourced_date": r["sourced_date"],
+            "job_status": r["job_status"],
+        }
+        for r in rows
+    ]
+
+
+@mcp.tool()
+def record_recruiter_outreach(
+    source: str,
+    identity: str,
+    company: str,
+    position_title: str,
+    occurred_date: str = "",
+    name: str = "",
+    agency: str = "",
+    email: str = "",
+    notes: str = "",
+    account: str = "primary",
+    message_id: str = "",
+    thread_id: str = "",
+    subject: str = "",
+) -> dict:
+    """
+    Captures ONE recruiter-sourced role. Call once per role, not once per email.
+
+    A recruiter sending three roles is three calls sharing one message_id — that
+    is what keeps them as three independently-trackable rows instead of one row
+    with a slash-joined title.
+
+    `source` is 'email' (identity = the sender address) or 'linkedin' (identity =
+    the profile slug). LinkedIn InMail arrives from a shared relay address, so
+    the address cannot identify the recruiter.
+
+    Creates the job row at status 'Tracking' with a deterministic synthetic link,
+    so re-processing the same email updates rather than duplicates. Idempotent.
+    """
+    if source not in jobs_db.RECRUITER_SOURCES:
+        return {"error": f"source must be one of: {', '.join(jobs_db.RECRUITER_SOURCES)}"}
+    if not identity.strip():
+        return {"error": "identity is required"}
+    if not company.strip() or not position_title.strip():
+        return {"error": "company and position_title are required"}
+
+    when = occurred_date.strip() or date.today().isoformat()
+    title = position_title.strip()
+    link = jobs_db.recruiter_link(source, identity.strip(), title)
+
+    recruiter_id = jobs_db.upsert_recruiter(
+        source=source, identity=identity.strip(), name=name, agency=agency,
+        email=email, seen_date=when,
+    )
+
+    # Keyed on the synthetic link, so a re-processed email finds the row it
+    # created last time and keeps its original date_added and status.
+    existing = jobs_db.find_job_by_link(link)
+    jobs_db.upsert_job({
+        "company": company.strip(),
+        "position_title": title,
+        "job_summary": "",
+        "location": "",
+        "link": link,
+        "date_added": (existing or {}).get("date_added") or when,
+        "contacts": f"{name} — {email}".strip(" —") if (name or email) else "",
+        "notes": notes,
+        "outreach_date": "",
+        "date_applied": "",
+        "status": (existing or {}).get("status") or "Tracking",
+        "followup_log": "",
+    })
+    jobs_db.link_recruiter_job(
+        recruiter_id, company=company.strip(),
+        date_added=(existing or {}).get("date_added") or when,
+        position_title=title, link=link, sourced_date=when,
+        account=account, message_id=message_id,
+    )
+    if message_id:
+        jobs_db.record_recruiter_message(
+            recruiter_id, "inbound", when, subject=subject,
+            account=account, message_id=message_id, thread_id=thread_id,
+        )
+    return {"recruiter_id": recruiter_id, "company": company.strip(),
+            "position_title": title, "link": link}
+
+
+@mcp.tool()
+def record_recruiter_reply(identity: str, source: str = "email",
+                           occurred_date: str = "", account: str = "primary",
+                           message_id: str = "", thread_id: str = "",
+                           subject: str = "") -> dict:
+    """
+    Records that Joel answered a recruiter. Idempotent on (account, message_id).
+    """
+    if source not in jobs_db.RECRUITER_SOURCES:
+        return {"error": f"source must be one of: {', '.join(jobs_db.RECRUITER_SOURCES)}"}
+    recruiter_id = jobs_db.upsert_recruiter(source=source, identity=identity)
+    when = occurred_date.strip() or date.today().isoformat()
+    jobs_db.record_recruiter_message(
+        recruiter_id, "reply", when, subject=subject,
+        account=account, message_id=message_id, thread_id=thread_id,
+    )
+    return {"recruiter_id": recruiter_id, "recorded": when}
+
+
 if __name__ == "__main__":
     mcp.run()

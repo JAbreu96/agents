@@ -23,7 +23,10 @@ import gspread
 from google.oauth2 import service_account
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from src.jobs_db import COLUMNS, INTERVIEW_COLUMNS, get_all_jobs, get_interviews  # noqa: E402
+from src.jobs_db import (  # noqa: E402
+    COLUMNS, INTERVIEW_COLUMNS, RECRUITER_COLUMNS, RECRUITER_JOB_COLUMNS,
+    get_all_jobs, get_interviews, get_recruiter_jobs, get_recruiters,
+)
 
 SERVICE_ACCOUNT_FILE = os.environ.get(
     "GOOGLE_APPLICATION_CREDENTIALS",
@@ -37,6 +40,8 @@ SCOPES = [
 SPREADSHEET_ID = "1CTqYgEFnOUySEIBpqFxeRdjBJxeImi40MZ_rhq9NE4Q"
 EXPORT_WORKSHEET = "Daily Export"
 INTERVIEWS_WORKSHEET = "Interviews"
+RECRUITERS_WORKSHEET = "Recruiters"
+RECRUITER_ROLES_WORKSHEET = "Recruiter Roles"
 
 
 def export_and_upload():
@@ -61,6 +66,7 @@ def export_and_upload():
     print(f"Wrote {len(jobs)} rows to '{EXPORT_WORKSHEET}' tab")
 
     _export_interviews(spreadsheet)
+    _export_recruiters(spreadsheet)
 
 
 def _export_interviews(spreadsheet) -> None:
@@ -95,6 +101,41 @@ def _export_interviews(spreadsheet) -> None:
     ws.update(range_name="A1", values=rows, value_input_option="RAW")
 
     print(f"Wrote {len(interviews)} rows to '{INTERVIEWS_WORKSHEET}' tab")
+
+
+def _write_tab(spreadsheet, title, columns, rows) -> None:
+    """Replaces one tab wholesale. One-way, DB -> Sheet."""
+    try:
+        ws = spreadsheet.worksheet(title)
+    except gspread.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title=title, rows=1, cols=len(columns))
+        print(f"Created '{title}' tab")
+
+    values = [columns] + [
+        [("" if r.get(c) is None else r.get(c)) for c in columns] for r in rows
+    ]
+    ws.clear()
+    ws.update(range_name="A1", values=values, value_input_option="RAW")
+    print(f"Wrote {len(rows)} rows to '{title}' tab")
+
+
+def _export_recruiters(spreadsheet) -> None:
+    """
+    Mirrors the recruiter tables outward, DB -> Sheet, and never the reverse.
+
+    Same reasoning as _export_interviews: the Sheet is upstream of `jobs`, but it
+    knows nothing about recruiters. Who sent what, and which roles came from one
+    person, exists only in jobs.db — which is gitignored and backed up only by
+    local .bak files on the same disk.
+
+    Two tabs because the shape is one-to-many: flattening a recruiter across
+    their roles would repeat their details on every line and lose anyone who has
+    pitched nothing yet.
+    """
+    _write_tab(spreadsheet, RECRUITERS_WORKSHEET, RECRUITER_COLUMNS,
+               get_recruiters())
+    _write_tab(spreadsheet, RECRUITER_ROLES_WORKSHEET, RECRUITER_JOB_COLUMNS,
+               get_recruiter_jobs())
 
 
 if __name__ == "__main__":

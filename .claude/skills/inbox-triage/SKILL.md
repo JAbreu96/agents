@@ -179,14 +179,41 @@ Read the returned sentence to attribute the rejection to **one** role, set that 
 constantly, and it carries the warmest lead the inbox produces: they have already read his
 resume. Closing the thread throws it away.
 
-### Scoring inbound roles
+### Capturing inbound roles
 
-**`recruiter_outreach`** always creates a row rather than updating one, since the role is by
-definition untracked: status `Tracking` (Joel has not applied), the recruiter's name and
-address in `contacts`, and a note saying it came from inbound outreach. If the same firm
-pitches again, add a row for the new role — do not overwrite the old one.
+**Split the message into roles before writing anything.** One email routinely carries
+several: Laxman Ottem sent a Frontend Engineer role and a Cloud Backend Engineer role
+fourteen minutes apart, and they were captured as one row titled
+`Frontend Engineer / Cloud Backend Engineer`. Two roles in one row cannot carry independent
+statuses, so you cannot reject one and pursue the other.
 
-Score it and put `Match Score: X/100` plus a one-line rationale and the top gaps in the note:
+Then call `mcp__job_tracker__record_recruiter_outreach` **once per role**, all sharing the
+same `message_id`:
+
+| Argument | Value |
+|---|---|
+| `source` | `email`, or `linkedin` for `hit-reply@` / `inmail-hit-reply@` mail |
+| `identity` | the sender address, or the **LinkedIn profile slug** |
+| `company` | the agency name when the employer is undisclosed (`Kastech SSG`) |
+| `position_title` | this role alone, never two joined by a slash |
+| `name`, `agency`, `email` | as signed |
+| `account` | `primary`, or `alt` for the `ajoelcrist@` inbox |
+| `message_id`, `thread_id`, `subject` | from `read_email` |
+| `notes` | the score and rationale, below |
+
+It creates the job row at status `Tracking` with a deterministic synthetic link, so
+**re-processing the same email updates rather than duplicating** — and it never downgrades a
+status that has since moved on.
+
+**`identity` is not always the sender address.** LinkedIn InMail arrives from the shared relay
+`inmail-hit-reply@linkedin.com`; keying on that address would file every LinkedIn recruiter
+Joel ever hears from as one person. Use the profile slug from their message or profile link.
+
+If the same firm pitches again, that is a new role and a new call — never overwrite the old one.
+Two people at one agency (AceStack wrote from both `gautamk@` and `dhruvr@`) are two recruiters.
+
+Score each role and put `Match Score: X/100` plus a one-line rationale and the top gaps in
+`notes`:
 
 - **Stack** — TypeScript, React, Node.js, GraphQL, JavaScript, Hack/PHP are the core;
   Python, SQL, AWS, Docker, Mongo, Postgres, Java are exposure only.
@@ -199,6 +226,11 @@ Score it and put `Match Score: X/100` plus a one-line rationale and the top gaps
 Alibaba Cloud DevOps or embedded firmware pitch scores in the teens and stays silent, while a
 genuinely matched inbound role still gets its chance at a task. Anything already tracked is
 not re-scored.
+
+**Roles score individually; the thread produces at most one task.** Step 5 is the only thing
+that creates tasks, and its `thread:<id>` duplicate check already collapses several qualifying
+roles from one email into a single interruption. Do not create a task here, and do not create
+one per role.
 
 **Never advance a status on a message you cannot read.** Indeed and some ATS portals send
 "you have a new message" with the body behind a login. That is an `unsure` item worth a task,
@@ -323,6 +355,11 @@ Drafts are never sent. Triage does not send email; it leaves work ready for Joel
   stats and cannot be rebuilt from anywhere else.
 - **A row was acted on**: `jobs_db.update_followup_log` with today's date, so "have I dealt
   with this" stops being invisible.
+- **Joel answered a recruiter**: `mcp__job_tracker__record_recruiter_reply` with their
+  `identity` and the sent message's id. Step 2 already drops threads whose newest message is
+  `is_from_joel` — record the reply *before* dropping one that belongs to a known recruiter,
+  or the only evidence he engaged is lost. Step 5b's drafts are not replies; record sent mail
+  only.
 
 ---
 
@@ -350,6 +387,7 @@ inbox-triage <date>
   threads: <n> grouped, <n> dropped (Joel spoke last)
   human: <n>  deadline: <n>  rejection: <n>  auto_ack: <n>  outreach: <n>  noise: <n>
   gate: <n> passed, <n> stopped (no ask: <n>, sign-off: <n>, score < 60: <n>)
+  recruiters: <n> seen (<n> new), <n> roles captured, <n> replies recorded
   tracker: <n> updated, <n> created, <n> ambiguous (asked)
   tasks: <n> created, <n> skipped as duplicates, <n> superseded
   interviews recorded: <n>

@@ -27,7 +27,7 @@ echo "=== inbox-triage run: $(date) ===" >> "$LOG_FILE"
 claude -p "/inbox-triage" \
   --mcp-config .mcp.json \
   --strict-mcp-config \
-  --allowedTools "mcp__gmail_personal__search_emails,mcp__gmail_personal__read_email,mcp__gmail_personal__draft_email,mcp__gmail_alt__search_emails,mcp__gmail_alt__read_email,mcp__job_tracker__find_job_for_email,mcp__job_tracker__update_job_status,mcp__job_tracker__update_notes,mcp__job_tracker__add_job,mcp__job_tracker__list_all_jobs,mcp__gtasks__list,mcp__gtasks__list_task_lists,mcp__gtasks__create,mcp__gtasks__update,Bash" \
+  --allowedTools "mcp__gmail_personal__search_emails,mcp__gmail_personal__read_email,mcp__gmail_personal__draft_email,mcp__gmail_alt__search_emails,mcp__gmail_alt__read_email,mcp__job_tracker__find_job_for_email,mcp__job_tracker__update_job_status,mcp__job_tracker__update_notes,mcp__job_tracker__add_job,mcp__job_tracker__record_recruiter_outreach,mcp__job_tracker__record_recruiter_reply,mcp__job_tracker__list_recruiters,mcp__job_tracker__list_all_jobs,mcp__gtasks__list,mcp__gtasks__list_task_lists,mcp__gtasks__create,mcp__gtasks__update,Bash" \
   >> "$LOG_FILE" 2>&1
 
 echo "=== done ===" >> "$LOG_FILE"

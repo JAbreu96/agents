@@ -257,6 +257,57 @@
       <p class="empty">No interview rounds logged yet.</p>
     {% endif %}
   </div>
+
+  <div class="card">
+    <h2>Recruiters</h2>
+    <div class="sub">
+      Inbound outreach — people who pitched roles Joel never applied to. One recruiter
+      sends N roles, so each role is its own tracked row rather than a slash-joined title.
+    </div>
+    {% if recruiters %}
+    <table>
+      <thead>
+        <tr>
+          <th>Recruiter</th><th>Agency</th><th>Via</th>
+          <th class="num">Roles</th><th class="num">Replies</th><th>Last heard</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in recruiters %}
+          <tr>
+            <td>{{ r.name or r.identity }}</td>
+            <td>{{ r.agency or "—" }}</td>
+            <td>{{ "LinkedIn" if r.source == "linkedin" else "Email" }}</td>
+            <td class="num">{{ r.role_count }}</td>
+            <td class="num">{{ r.reply_count or 0 }}</td>
+            <td>{{ r.last_seen or r.first_seen }}</td>
+          </tr>
+          {% for role in recruiter_roles if role.recruiter_identity == r.identity %}
+            <tr class="sub-row">
+              <td colspan="3">{{ role.position_title }}</td>
+              <td colspan="2">
+                {% if role.job_status %}{{ role.job_status }}
+                {% else %}<span class="muted">row missing</span>{% endif %}
+              </td>
+              <td>{{ role.sourced_date }}</td>
+            </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="note">
+      Identity is the sender address for email, and the profile slug for LinkedIn —
+      InMail arrives from a shared relay (<code>inmail-hit-reply@linkedin.com</code>),
+      so the address identifies LinkedIn, not the person. <strong>Read-only here</strong>:
+      rows are written by <code>inbox-triage</code>, never from this page.
+    </div>
+    {% else %}
+    <p class="muted" style="font-size:13px;margin:0;">
+      No recruiter outreach captured yet.
+    </p>
+    {% endif %}
+  </div>
+
 </main>
 
 <script>

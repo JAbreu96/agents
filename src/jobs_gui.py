@@ -30,6 +30,8 @@ from src.jobs_db import (  # noqa: E402
     find_job_by_link,
     funnel_stats,
     get_interviews,
+    get_recruiter_jobs,
+    get_recruiters,
     interview_stats,
     upsert_job,
 )
@@ -261,6 +263,8 @@ def insights_view():
         rate_min=RATE_MIN_DENOMINATOR,
         ghost_days=GHOSTED_AFTER_DAYS,
         interview_types=INTERVIEW_TYPES,
+        recruiters=get_recruiters(),
+        recruiter_roles=get_recruiter_jobs(),
     )
 
 
@@ -273,6 +277,15 @@ def interviews_view():
 @app.route("/api/funnel")
 def api_funnel():
     return jsonify(funnel_stats())
+
+
+@app.route("/api/recruiters")
+def api_recruiters():
+    """Read-only. Recruiter rows are written by inbox-triage, never by the GUI."""
+    return jsonify({
+        "recruiters": get_recruiters(),
+        "roles": get_recruiter_jobs(),
+    })
 
 
 @app.route("/api/interviews")
