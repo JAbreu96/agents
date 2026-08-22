@@ -104,6 +104,10 @@ _ASK_PHRASES = (
     "are you available", "are you interested", "do you have time",
     "what times", "when are you", "your availability",
     "get back to me", "confirm your", "sign the", "complete the",
+    # soft asks -- an offer that still puts the next move on Joel
+    "if you're interested", "if you are interested", "if that sounds",
+    "happy to schedule", "happy to set up", "would you be open",
+    "are you open to", "worth taking a look", "let us know",
 )
 
 
@@ -180,7 +184,7 @@ _REJECTION_PHRASES = (
     "not moving forward", "not move forward", "moving forward with other",
     "moving forward with another", "other candidates", "another candidate",
     "decided not to proceed", "decided not to move", "will not be proceeding",
-    "regret to inform", "unfortunately we", "unfortunately, we",
+    "regret to inform",
     "we have filled", "we've filled", "position has been filled",
     "no longer under consideration", "not be moving ahead",
     "pursue other candidates", "went with another",
@@ -201,6 +205,17 @@ class Rejection:
     sentence: str
 
 
+# "unfortunately" alone means nothing -- recruiters open bad-news-lite with it
+# constantly ("unfortunately we were a bit late", "unfortunately the manager is
+# out"). It only counts next to an actual rejection cue.
+_UNFORTUNATELY = re.compile(
+    r"unfortunat\w*[^.!?]{0,140}?"
+    r"(not (moving|proceed|select|going)|other candidate|another candidate|"
+    r"filled|no longer|decided (not|to pass)|unable to (move|proceed))",
+    re.I | re.S,
+)
+
+
 def detect_rejection(body: str) -> Optional[Rejection]:
     """Locate rejection language in the newest message's own text."""
     own = strip_quoted_chain(body)
@@ -209,6 +224,9 @@ def detect_rejection(body: str) -> Optional[Rejection]:
         for phrase in _REJECTION_PHRASES:
             if phrase in lowered:
                 return Rejection(phrase=phrase, sentence=sentence)
+        hit = _UNFORTUNATELY.search(sentence)
+        if hit:
+            return Rejection(phrase="unfortunately+" + hit.group(1), sentence=sentence)
     return None
 
 

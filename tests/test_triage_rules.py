@@ -166,3 +166,46 @@ def test_escaped_ampersand_is_repaired_before_any_write():
         == "Systems Integration & Validation"
     assert unescape_title("R&amp;D  Engineer&#39;s Assistant") \
         == "R&D Engineer's Assistant"
+
+
+# ------------------------------------- "unfortunately" is not a rejection
+
+def test_a_recruiter_apologising_for_being_slow_is_not_a_rejection():
+    """Stephen Levis, 21 Aug 2026 -- caught during the first live backfill.
+
+    "unfortunately we" used to match this, which would have closed a row on a
+    message that was actually pitching a *new* role.
+    """
+    body = ("Ive had another role come up that i think could be of interest - "
+            "unfortunately we were a bit late on the other ones so looks like "
+            "we have missed out on them")
+    assert detect_rejection(body) is None
+
+
+def test_unfortunately_still_counts_next_to_a_real_cue():
+    for body in (
+        "Unfortunately we are not moving forward with your application.",
+        "Unfortunately, we have decided not to proceed at this time.",
+        "Unfortunately the role has been filled.",
+    ):
+        assert detect_rejection(body) is not None, body
+
+
+def test_unfortunately_about_logistics_is_not_a_rejection():
+    assert detect_rejection(
+        "Unfortunately we are still waiting on the hiring manager to confirm."
+    ) is None
+
+
+# ------------------------------------------------------------- soft asks
+
+def test_a_soft_offer_still_counts_as_an_ask():
+    """Rashi Sharma, 18 Aug 2026 -- no question mark, but the move is Joel's."""
+    assert contains_ask(
+        "If you're interested, I'd be happy to schedule a quick call to "
+        "discuss the role."
+    ) is True
+
+
+def test_informational_updates_still_carry_no_ask():
+    assert contains_ask("I will be sending the job details to you shortly.") is False
