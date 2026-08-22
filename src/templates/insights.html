@@ -264,6 +264,11 @@
       Inbound outreach — people who pitched roles Joel never applied to. One recruiter
       sends N roles, so each role is its own tracked row rather than a slash-joined title.
     </div>
+    <p class="muted" style="font-size:13px;margin:0 0 12px;">
+      <strong>{{ coverage.captured }}</strong> captured
+      {%- if coverage.suspected_uncaptured %} &middot;
+      <strong>{{ coverage.suspected_uncaptured }}</strong> suspected uncaptured{% endif %}
+    </p>
     {% if recruiters %}
     <table>
       <thead>
@@ -295,11 +300,36 @@
         {% endfor %}
       </tbody>
     </table>
+    {% if coverage.rows %}
+    <h2 style="margin:22px 0 4px;font-size:14px;">Suspected, not captured</h2>
+    <div class="sub">
+      These look recruiter-sourced — the link is a conversation rather than a job posting —
+      but no recruiter is on record for them. Screening rows first: an uncaptured role still
+      at a screen is a live relationship you cannot see.
+    </div>
+    <table>
+      <thead>
+        <tr><th>Company</th><th>Role</th><th>Status</th><th>Added</th></tr>
+      </thead>
+      <tbody>
+        {% for row in coverage.rows %}
+          <tr>
+            <td>{{ row.company }}</td>
+            <td>{{ row.position_title }}</td>
+            <td>{{ row.status or "—" }}</td>
+            <td>{{ row.date_added }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
     <div class="note">
       Identity is the sender address for email, and the profile slug for LinkedIn —
       InMail arrives from a shared relay (<code>inmail-hit-reply@linkedin.com</code>),
       so the address identifies LinkedIn, not the person. <strong>Read-only here</strong>:
-      rows are written by <code>inbox-triage</code>, never from this page.
+      rows are written by <code>inbox-triage</code>, never from this page — a suspected row is
+      closed out by re-running it against the original message, which is the only place the
+      recruiter's identity can actually be read.
     </div>
     {% else %}
     <p class="muted" style="font-size:13px;margin:0;">

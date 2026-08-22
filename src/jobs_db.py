@@ -1194,3 +1194,92 @@ def get_recruiter_messages(recruiter_id: Optional[int] = None) -> list[dict]:
         return [dict(r) for r in conn.execute(query, params).fetchall()]
     finally:
         conn.close()
+
+
+# A recruiter-sourced row is one whose link is a CONVERSATION rather than a job
+# posting: inbound outreach arrives as a message, whereas a posting URL means
+# Joel went looking. Earlier drafts matched company strings too ('%agency%',
+# '%via %') and both patterns produced false positives on real rows — OLIVER
+# Agency and LMD Agency are ApplyPass applications to real employers, and the
+# AustinWorks and Venture Up rows are postings Joel applied to that happen to be
+# agency-placed. Company names are prose; link shape is structural.
+_CONVERSATION_LINKS = ("recruiter:%", "mailto:%", "%linkedin.com/messaging%")
+
+
+def _coverage_tier(status: str) -> int:
+    """
+    0 = live at a screening stage, 1 = ordinary, 2 = closed.
+
+    Sorting by raw progress would rank Rejected above Tracking, which inverts
+    the urgency this list exists to show: an uncaptured role still at a screen
+    is a live relationship that is invisible, while an uncaptured Rejected one
+    is bookkeeping.
+    """
+    s = (status or "").strip().lower()
+    if s in SCREEN_STATUSES:
+        return 0
+    if s in TERMINAL_FAIL_STATUSES or s in TERMINAL_WIN_STATUSES:
+        return 2
+    return 1
+
+
+def unlinked_recruiter_rows() -> list[dict]:
+    """
+    Job rows that look recruiter-sourced but are linked to no recruiter.
+
+    Heuristic, and deliberately tuned tight. A miss is invisible and costs
+    nothing — the row stays untracked exactly as it is today. A false positive
+    is visible on the Insights card, and a handful of them teach you to ignore
+    the whole thing. So this accepts misses to buy precision.
+
+    Auto-apply imports are excluded outright: an ApplyPass row is by definition
+    an application Joel submitted, not outreach he received.
+    """
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        link_clause = " OR ".join("j.link LIKE ?" for _ in _CONVERSATION_LINKS)
+        rows = conn.execute(
+            f"SELECT j.company, j.date_added, j.position_title, j.link, j.status, "
+            f"       j.notes, j.date_applied "
+            f"FROM jobs j "
+            f"WHERE ({link_clause}) "
+            f"  AND COALESCE(j.notes, '') NOT LIKE '%auto-apply export%' "
+            f"  AND NOT EXISTS (SELECT 1 FROM recruiter_jobs rj "
+            f"                  WHERE rj.company = j.company AND rj.date_added = j.date_added "
+            f"                    AND rj.position_title = j.position_title AND rj.link = j.link)",
+            list(_CONVERSATION_LINKS),
+        ).fetchall()
+        out = [dict(r) for r in rows]
+        out.sort(key=lambda r: (_coverage_tier(r["status"]), _neg_date(r["date_added"])))
+        return out
+    finally:
+        conn.close()
+
+
+def _neg_date(value: str) -> str:
+    """Sort key that puts newer dates first inside a tier."""
+    return "".join(chr(255 - ord(c)) for c in (value or ""))
+
+
+def recruiter_coverage() -> dict:
+    """
+    Two counts, never a ratio.
+
+    A coverage percentage would need a known denominator, and this one is a
+    heuristic that errs in both directions. Worse, the ratio would IMPROVE as
+    the heuristic got stricter — tightening the patterns shrinks the denominator
+    without capturing a single extra row. Two integers say the same thing
+    without claiming a total that cannot be computed, which is the rule
+    funnel_stats() already follows for unmeasured stages.
+    """
+    unlinked = unlinked_recruiter_rows()
+    conn = _connect()
+    captured = 0
+    if conn:
+        try:
+            captured = conn.execute("SELECT COUNT(*) AS n FROM recruiter_jobs").fetchone()["n"]
+        finally:
+            conn.close()
+    return {"captured": captured, "suspected_uncaptured": len(unlinked), "rows": unlinked}

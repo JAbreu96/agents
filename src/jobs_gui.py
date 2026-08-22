@@ -32,6 +32,7 @@ from src.jobs_db import (  # noqa: E402
     get_interviews,
     get_recruiter_jobs,
     get_recruiters,
+    recruiter_coverage,
     interview_stats,
     upsert_job,
 )
@@ -265,6 +266,7 @@ def insights_view():
         interview_types=INTERVIEW_TYPES,
         recruiters=get_recruiters(),
         recruiter_roles=get_recruiter_jobs(),
+        coverage=recruiter_coverage(),
     )
 
 
@@ -285,6 +287,7 @@ def api_recruiters():
     return jsonify({
         "recruiters": get_recruiters(),
         "roles": get_recruiter_jobs(),
+        "coverage": recruiter_coverage(),
     })
 
 

@@ -337,3 +337,141 @@ def test_reply_is_recorded_through_the_tool(srv):
     _call(srv.record_recruiter_reply, identity="laxmano@kastechssg.com",
           occurred_date="2026-08-21", message_id="msg-2")
     assert _call(srv.list_recruiters)[0]["replies"] == 1
+
+
+# --- capture coverage -------------------------------------------------------
+# These tests encode MISTAKES, not the rule. Asserting that the heuristic does
+# what the heuristic says proves nothing — the fixture gets written to match.
+# Each exclusion below is a row that actually existed and was actually caught
+# wrongly by an earlier draft, found by inspecting the live DB.
+
+def _plain_job(db, company, title, link, status="Tracking", notes="", applied=""):
+    db.upsert_job({
+        "company": company, "position_title": title, "job_summary": "", "location": "",
+        "link": link, "date_added": "2026-08-20", "contacts": "", "notes": notes,
+        "outreach_date": "", "date_applied": applied, "status": status, "followup_log": "",
+    })
+
+
+def _flagged(db):
+    return {r["company"] for r in db.unlinked_recruiter_rows()}
+
+
+def test_excludes_oliver_agency_an_applypass_row(db):
+    """
+    Caught by an earlier '%agency%' pattern. OLIVER Agency - North America is a
+    real employer with a Greenhouse posting; 'Agency' is just part of its name.
+    """
+    _plain_job(db, "OLIVER Agency - North America", "Front End Developer",
+               "https://job-boards.greenhouse.io/oliverusa/jobs/8088966",
+               status="Applied",
+               notes="Imported from auto-apply export (auto-submitted application).")
+    assert "OLIVER Agency - North America" not in _flagged(db)
+
+
+def test_excludes_lmd_agency_an_applypass_row(db):
+    """Same '%agency%' mistake, different ATS."""
+    _plain_job(db, "LMD Agency", "SharePoint Developer",
+               "https://ats.rippling.com/lmd-agency/jobs/f282fc23",
+               status="Applied",
+               notes="Imported from auto-apply export (auto-submitted application).")
+    assert "LMD Agency" not in _flagged(db)
+
+
+def test_excludes_austinworks_an_outbound_posting(db):
+    """
+    Caught by an earlier '%via %' company pattern. The link is a job board
+    posting — Joel went looking. 'via AustinWorks' names who placed the role,
+    not someone who wrote to him.
+    """
+    _plain_job(db, "(Unknown — Anonymous AI Startup via AustinWorks)",
+               "Frontend Engineer (React/Next.js)",
+               "https://www.austinworks.co/frontendengineersf", status="")
+    assert not _flagged(db)
+
+
+def test_excludes_venture_up_a_linkedin_jobs_posting(db):
+    """
+    The subtle one: a linkedin.com URL that is a POSTING, not a message thread.
+    /jobs/view/ must not match where /messaging/ does.
+    """
+    _plain_job(db, "(Anonymous AI Startup via Venture Up)", "Full Stack / AI Engineer",
+               "https://www.linkedin.com/jobs/view/4420439039/",
+               status="Applied", applied="2026-05-28")
+    assert not _flagged(db)
+
+
+# Real positives — the shapes inbound outreach actually arrives in.
+
+def test_flags_a_linkedin_message_thread(db):
+    _plain_job(db, "NACE Partners", "Software Engineer (role not yet specified)",
+               "https://www.linkedin.com/messaging/thread/2-ZTg0NTk0ZWIt",
+               status="Phone Screen")
+    assert "NACE Partners" in _flagged(db)
+
+
+def test_flags_a_bare_messaging_link(db):
+    """Three rows arrived with no thread id at all, just the messaging root."""
+    _plain_job(db, "Unnamed client via Andrea Hirsch", "Senior Java Backend Developer",
+               "https://www.linkedin.com/messaging/")
+    assert "Unnamed client via Andrea Hirsch" in _flagged(db)
+
+
+def test_flags_a_mailto_row(db):
+    """The pre-migration shape: link = mailto:<recruiter>."""
+    _plain_job(db, "Kastech SSG", "Frontend Engineer", "mailto:laxmano@kastechssg.com")
+    assert "Kastech SSG" in _flagged(db)
+
+
+def test_flags_an_orphaned_synthetic_link(db):
+    """
+    Zero of these exist today — every recruiter: row is linked. It is the safety
+    net for a write that half-completes, so it must actually work.
+    """
+    _plain_job(db, "Kastech SSG", "Frontend Engineer",
+               "recruiter:email:laxmano@kastechssg.com/frontend-engineer")
+    assert "Kastech SSG" in _flagged(db)
+
+
+def test_a_linked_row_drops_off_the_list(db):
+    rid = db.upsert_recruiter("email", "laxmano@kastechssg.com")
+    _capture(db, rid, "Kastech SSG", "Frontend Engineer")
+    assert not _flagged(db)
+
+
+def test_ordinary_direct_application_is_never_flagged(db):
+    """The false-positive guard for the 700+ rows that are none of this."""
+    _plain_job(db, "Stripe", "Software Engineer",
+               "https://job-boards.greenhouse.io/stripe/jobs/123", status="Applied")
+    assert not _flagged(db)
+
+
+# Ordering: live relationships above closed ones.
+
+def test_screening_rows_sort_above_tracking(db):
+    _plain_job(db, "Tracking Co", "Eng", "https://www.linkedin.com/messaging/1")
+    _plain_job(db, "Screen Co", "Eng", "https://www.linkedin.com/messaging/2",
+               status="Phone Screen")
+    assert [r["company"] for r in db.unlinked_recruiter_rows()][0] == "Screen Co"
+
+
+def test_rejected_rows_sort_below_tracking(db):
+    """
+    Sorting by raw progress would put Rejected on top. An uncaptured Rejected
+    role is bookkeeping; an uncaptured Tracking one may still be live.
+    """
+    _plain_job(db, "Rejected Co", "Eng", "https://www.linkedin.com/messaging/1",
+               status="Rejected")
+    _plain_job(db, "Tracking Co", "Eng", "https://www.linkedin.com/messaging/2")
+    assert [r["company"] for r in db.unlinked_recruiter_rows()][-1] == "Rejected Co"
+
+
+def test_coverage_reports_two_counts_and_no_ratio(db):
+    rid = db.upsert_recruiter("email", "laxmano@kastechssg.com")
+    _capture(db, rid, "Kastech SSG", "Frontend Engineer")
+    _plain_job(db, "NACE Partners", "Eng", "https://www.linkedin.com/messaging/1")
+
+    cov = db.recruiter_coverage()
+    assert cov["captured"] == 1
+    assert cov["suspected_uncaptured"] == 1
+    assert not any("rate" in k or "percent" in k for k in cov)
