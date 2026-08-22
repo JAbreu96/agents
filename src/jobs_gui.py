@@ -30,6 +30,11 @@ from src.jobs_db import (  # noqa: E402
     find_job_by_link,
     funnel_stats,
     get_interviews,
+    get_recruiter_jobs,
+    get_recruiters,
+    job_silence_stats,
+    upcoming_interviews,
+    recruiter_coverage,
     interview_stats,
     upsert_job,
 )
@@ -261,6 +266,11 @@ def insights_view():
         rate_min=RATE_MIN_DENOMINATOR,
         ghost_days=GHOSTED_AFTER_DAYS,
         interview_types=INTERVIEW_TYPES,
+        recruiters=get_recruiters(),
+        recruiter_roles=get_recruiter_jobs(),
+        coverage=recruiter_coverage(),
+        silence=job_silence_stats(),
+        upcoming=upcoming_interviews(include_past=True),
     )
 
 
@@ -273,6 +283,29 @@ def interviews_view():
 @app.route("/api/funnel")
 def api_funnel():
     return jsonify(funnel_stats())
+
+
+@app.route("/api/interviews/upcoming")
+def api_upcoming_interviews():
+    """Booked but not yet held. Never counted toward any rate."""
+    return jsonify(upcoming_interviews(
+        include_past=request.args.get("include_past") in ("1", "true", "yes")))
+
+
+@app.route("/api/silence")
+def api_silence():
+    """Derived on read — no silence verdict is ever stored."""
+    return jsonify(job_silence_stats())
+
+
+@app.route("/api/recruiters")
+def api_recruiters():
+    """Read-only. Recruiter rows are written by inbox-triage, never by the GUI."""
+    return jsonify({
+        "recruiters": get_recruiters(),
+        "roles": get_recruiter_jobs(),
+        "coverage": recruiter_coverage(),
+    })
 
 
 @app.route("/api/interviews")

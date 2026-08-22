@@ -196,25 +196,37 @@
   </div>
 
   <div class="card">
-    <h2>Round outcomes by type</h2>
+    <h2>How interview rounds turned out</h2>
     <div class="sub">
-      How often a round of each type was followed by another round, versus ended the process.
-      Rate is advanced &divide; (advanced + failed + ghosted). Rounds still in flight are excluded
-      from the denominator; ghosted ones are not.
+      Every round is judged on one question: <em>did anything follow it?</em> Nothing here is
+      typed in by hand — a rejection email never says which round lost it, so the outcome is
+      worked out from what happened next.
     </div>
+
     {% set totals = stats.totals %}
-    <p class="muted" style="font-size:13px;margin:0 0 12px;">
-      <strong>{{ totals.rounds }}</strong> rounds logged &middot;
-      {{ totals.advanced }} advanced, {{ totals.failed }} failed,
-      {{ totals.ghosted }} ghosted, {{ totals.in_flight }} in flight
-      {% if totals.orphaned %} &middot; {{ totals.orphaned }} orphaned{% endif %}
-    </p>
     {% if stats.by_type %}
+    <p style="font-size:13px;margin:0 0 14px;">
+      <strong>{{ totals.rounds }}</strong> round{{ "" if totals.rounds == 1 else "s" }} logged.
+      {% if totals.decided %}
+        <strong>{{ totals.advanced }} of {{ totals.decided }}</strong> that reached a
+        conclusion led to another round.
+      {% else %}
+        None has reached a conclusion yet.
+      {% endif %}
+      {% if totals.awaiting_outcome %}
+        {{ totals.awaiting_outcome }} still too recent to call.
+      {% endif %}
+    </p>
+
     <table>
       <thead>
         <tr>
-          <th>Type</th><th class="num">Advanced</th><th class="num">Failed</th>
-          <th class="num">Ghosted</th><th class="num">In flight</th><th class="num">Rate</th>
+          <th>Round type</th>
+          <th class="num">Led to another round</th>
+          <th class="num">Ended in rejection</th>
+          <th class="num">Went silent</th>
+          <th class="num">No result yet</th>
+          <th class="num">Advance rate</th>
         </tr>
       </thead>
       <tbody>
@@ -224,39 +236,258 @@
             <td class="num">{{ row.total.advanced }}</td>
             <td class="num">{{ row.total.failed }}</td>
             <td class="num">{{ row.total.ghosted }}</td>
-            <td class="num">{{ row.total.in_flight }}</td>
+            <td class="num">{{ row.total.awaiting_outcome }}</td>
             <td class="num">
-              {% if row.total.rate is none %}<span class="muted">&mdash;</span>
-              {% else %}<span class="rate {{ 'good' if row.total.rate >= 50 else 'bad' }}">{{ row.total.rate }}%</span>{% endif %}
+              {% if row.total.rate is not none %}
+                <span class="rate {{ 'good' if row.total.rate >= 50 else 'bad' }}">{{ row.total.rate }}%</span>
+              {% elif row.total.decided %}
+                <span class="muted">{{ row.total.advanced }} of {{ row.total.decided }}</span>
+              {% else %}
+                <span class="muted">&mdash;</span>
+              {% endif %}
             </td>
           </tr>
           {% for scope in ["standalone", "loop"] %}
             {% set c = row[scope] %}
-            {% if c.advanced or c.failed or c.ghosted or c.in_flight %}
+            {% if c.advanced or c.failed or c.ghosted or c.awaiting_outcome %}
               <tr class="sub-row">
-                <td>{{ scope }}</td>
+                <td>{{ "one-off rounds" if scope == "standalone" else "part of an onsite loop" }}</td>
                 <td class="num">{{ c.advanced }}</td>
                 <td class="num">{{ c.failed }}</td>
                 <td class="num">{{ c.ghosted }}</td>
-                <td class="num">{{ c.in_flight }}</td>
-                <td class="num">{{ "—" if c.rate is none else (c.rate ~ "%") }}</td>
+                <td class="num">{{ c.awaiting_outcome }}</td>
+                <td class="num">
+                  {% if c.rate is not none %}{{ c.rate }}%
+                  {% elif c.decided %}<span class="muted">{{ c.advanced }} of {{ c.decided }}</span>
+                  {% else %}<span class="muted">&mdash;</span>{% endif %}
+                </td>
               </tr>
             {% endif %}
           {% endfor %}
         {% endfor %}
       </tbody>
     </table>
+
     <div class="note">
-      <strong>Ghosted</strong> is derived, never typed: a round with nothing after it,
-      on a job that never closed, that has been silent for {{ ghost_days }}+ days. It counts
-      against the rate because it demonstrably did not advance you — but it is broken out
-      so you can see how much of a low rate is silence rather than rejection, which is
-      often about the company rather than about you.
+      <strong>What the columns mean.</strong>
+      <em>Led to another round</em> — something came after it, or the job ended in an offer;
+      this round did not stop you.
+      <em>Ended in rejection</em> — it was the last round and the job is now rejected, so the
+      process ended here.
+      <em>Went silent</em> — last round, the job never closed, and nothing for
+      {{ ghost_days }}+ days. Nobody said no; they stopped replying. It counts against the
+      rate because it demonstrably did not advance you, but it is shown separately so you can
+      see how much of a low rate is silence rather than rejection — which is usually about the
+      company, not about you.
+      <em>No result yet</em> — the most recent round, still inside the {{ ghost_days }}-day
+      window. Excluded from the rate entirely: counting it as a failure would punish you for
+      a process that simply has not finished.
+    </div>
+    <div class="note">
+      <strong>Advance rate</strong> is how many rounds led to another one, out of those that
+      reached a conclusion. It stays as plain counts until
+      <strong>{{ stats.rate_min_rounds }}</strong> rounds have concluded — a percentage over
+      two or three is a claim the sample cannot support, and "0%" would read as a verdict
+      rather than a small number of calls.
     </div>
     {% else %}
       <p class="empty">No interview rounds logged yet.</p>
     {% endif %}
   </div>
+
+  <div class="card">
+    <h2>Coming up</h2>
+    <div class="sub">
+      Interviews that are on the calendar but have not happened yet. A booking is not
+      evidence a round took place — invites get cancelled — so none of these counts toward
+      any rate until it is marked as held.
+    </div>
+    {% if upcoming %}
+    <table>
+      <thead><tr><th>Company</th><th>Role</th><th>Type</th><th>Date</th><th class="num">When</th></tr></thead>
+      <tbody>
+        {% for u in upcoming %}
+          <tr>
+            <td>{{ u.company }}</td>
+            <td>{{ u.position_title }}</td>
+            <td>{{ (u.type_label or u.interview_type).replace("_", " ") }}</td>
+            <td>{{ u.scheduled_date }}</td>
+            <td class="num">
+              {% if u.overdue %}<span class="rate bad">{{ -u.days_away }}d overdue</span>
+              {% elif u.days_away == 0 %}today
+              {% else %}in {{ u.days_away }}d{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="note">
+      A booking whose date has passed with no outcome recorded shows as
+      <strong>overdue</strong> rather than disappearing — either it happened and was never
+      logged, or it never happened. Both are worth seeing; silently hiding it is how the
+      interview log drifts away from reality.
+    </div>
+    {% else %}
+    <p class="muted" style="font-size:13px;margin:0;">Nothing booked.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Silence</h2>
+    <div class="sub">
+      Two different events. <strong>Ghosted</strong> means someone engaged — an interview
+      happened, a recruiter wrote, or the job reached a screening stage — and then went quiet.
+      <strong>No response</strong> means an application was submitted and nobody ever engaged.
+      Both are derived on read; neither is stored.
+    </div>
+
+    <div class="converge">
+      <div class="tile">
+        <div class="label">GHOSTED</div>
+        <div class="value">{{ silence.counts.ghosted.total }}</div>
+        <div class="foot">silent {{ silence.ghosted_after_days }}+ days after contact</div>
+      </div>
+      <div class="tile">
+        <div class="label">NO RESPONSE</div>
+        <div class="value">{{ silence.counts.no_response.total }}</div>
+        <div class="foot">
+          {{ silence.counts.no_response.hand }} hand &middot;
+          {{ silence.counts.no_response.auto }} auto &middot;
+          {{ silence.no_response_after_days }}+ days
+        </div>
+      </div>
+      <div class="tile">
+        <div class="label">WAITING</div>
+        <div class="value">{{ silence.counts.waiting.total }}</div>
+        <div class="foot">still inside the window</div>
+      </div>
+    </div>
+
+    {% if silence.ghosted_rows %}
+    <h2 style="margin:22px 0 4px;font-size:14px;">Ghosted</h2>
+    <table>
+      <thead><tr><th>Company</th><th>Role</th><th>Status</th><th>Signal</th><th class="num">Idle</th></tr></thead>
+      <tbody>
+        {% for r in silence.ghosted_rows %}
+          <tr>
+            <td>{{ r.company }}</td><td>{{ r.position_title }}</td>
+            <td>{{ r.status or "—" }}</td>
+            <td>{{ r.signal.replace("_", " ") }}</td>
+            <td class="num">{{ r.idle_days }}d</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if silence.no_response_rows %}
+    <h2 style="margin:22px 0 4px;font-size:14px;">
+      No response{% if silence.no_response_rows|length > 10 %}
+      &mdash; oldest 10 of {{ silence.no_response_rows|length }}{% endif %}
+    </h2>
+    <table>
+      <thead><tr><th>Company</th><th>Role</th><th>Applied</th><th class="num">Idle</th></tr></thead>
+      <tbody>
+        {% for r in silence.no_response_rows[:10] %}
+          <tr>
+            <td>{{ r.company }}{% if r.auto_applied %} <span class="muted">(auto)</span>{% endif %}</td>
+            <td>{{ r.position_title }}</td>
+            <td>{{ r.since }}</td>
+            <td class="num">{{ r.idle_days }}d</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    <div class="note">
+      A row with no <code>date_applied</code> and no contact is left unclassified rather than
+      called silent — a <code>Tracking</code> row is not awaiting a reply, and counting it would
+      be counting a decision nobody made. <strong>Ghosted starts empty by design</strong>: every
+      job carrying a relationship signal today is younger than the threshold.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Recruiters</h2>
+    <div class="sub">
+      Inbound outreach — people who pitched roles Joel never applied to. One recruiter
+      sends N roles, so each role is its own tracked row rather than a slash-joined title.
+    </div>
+    <p class="muted" style="font-size:13px;margin:0 0 12px;">
+      <strong>{{ coverage.captured }}</strong> captured
+      {%- if coverage.suspected_uncaptured %} &middot;
+      <strong>{{ coverage.suspected_uncaptured }}</strong> suspected uncaptured{% endif %}
+    </p>
+    {% if recruiters %}
+    <table>
+      <thead>
+        <tr>
+          <th>Recruiter</th><th>Agency</th><th>Via</th>
+          <th class="num">Roles</th><th class="num">Replies</th><th>Last heard</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in recruiters %}
+          <tr>
+            <td>{{ r.name or r.identity }}</td>
+            <td>{{ r.agency or "—" }}</td>
+            <td>{{ "LinkedIn" if r.source == "linkedin" else "Email" }}</td>
+            <td class="num">{{ r.role_count }}</td>
+            <td class="num">{{ r.reply_count or 0 }}</td>
+            <td>{{ r.last_seen or r.first_seen }}</td>
+          </tr>
+          {% for role in recruiter_roles if role.recruiter_identity == r.identity %}
+            <tr class="sub-row">
+              <td colspan="3">{{ role.position_title }}</td>
+              <td colspan="2">
+                {% if role.job_status %}{{ role.job_status }}
+                {% else %}<span class="muted">row missing</span>{% endif %}
+              </td>
+              <td>{{ role.sourced_date }}</td>
+            </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if coverage.rows %}
+    <h2 style="margin:22px 0 4px;font-size:14px;">Suspected, not captured</h2>
+    <div class="sub">
+      These look recruiter-sourced — the link is a conversation rather than a job posting —
+      but no recruiter is on record for them. Screening rows first: an uncaptured role still
+      at a screen is a live relationship you cannot see.
+    </div>
+    <table>
+      <thead>
+        <tr><th>Company</th><th>Role</th><th>Status</th><th>Added</th></tr>
+      </thead>
+      <tbody>
+        {% for row in coverage.rows %}
+          <tr>
+            <td>{{ row.company }}</td>
+            <td>{{ row.position_title }}</td>
+            <td>{{ row.status or "—" }}</td>
+            <td>{{ row.date_added }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    <div class="note">
+      Identity is the sender address for email, and the profile slug for LinkedIn —
+      InMail arrives from a shared relay (<code>inmail-hit-reply@linkedin.com</code>),
+      so the address identifies LinkedIn, not the person. <strong>Read-only here</strong>:
+      rows are written by <code>inbox-triage</code>, never from this page — a suspected row is
+      closed out by re-running it against the original message, which is the only place the
+      recruiter's identity can actually be read.
+    </div>
+    {% else %}
+    <p class="muted" style="font-size:13px;margin:0;">
+      No recruiter outreach captured yet.
+    </p>
+    {% endif %}
+  </div>
+
 </main>
 
 <script>

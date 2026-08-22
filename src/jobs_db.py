@@ -94,6 +94,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_company ON jobs (company)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_archived ON jobs (archived)")
     _ensure_interviews_schema(conn)
+    _ensure_recruiters_schema(conn)
     conn.execute(_META_DDL)
 
 
@@ -485,9 +486,25 @@ TERMINAL_FAIL_STATUSES = {"rejected"}
 TERMINAL_WIN_STATUSES = {"offer", "accepted"}
 
 # Silence this long after a round, with nothing following it and no terminal
-# status, is a decision that was made and never communicated. Three weeks can
-# still be a slow loop; a month is not.
-GHOSTED_AFTER_DAYS = 30
+# status, is a decision that was made and never communicated. Two weeks is the
+# point where a process that is still alive normally says something, even if
+# only to apologise for the delay.
+#
+# This trades precision for recall: at 15 days some genuinely slow loops get
+# called ghosted, where 30 days let real ghostings sit as 'awaiting outcome' for a
+# month. The rate treats both as decided, so the shorter threshold makes it
+# move sooner and read slightly pessimistic rather than slightly flattering.
+# A percentage over a handful of rounds is a claim the sample cannot support:
+# two phone screens that went nowhere is a fact, while "0.0%" reads as a verdict
+# on your phone-screen ability. Below this many DECIDED rounds the counts are
+# shown and the percentage is withheld.
+#
+# Deliberately lower than the funnel's RATE_MIN_DENOMINATOR (30): interviews are
+# far rarer than applications, so reusing 30 would hide the rate essentially
+# forever rather than merely until it means something.
+INTERVIEW_RATE_MIN_ROUNDS = 8
+
+GHOSTED_AFTER_DAYS = 15
 
 _INTERVIEWS_DDL = """
         CREATE TABLE IF NOT EXISTS interviews (
@@ -499,7 +516,8 @@ _INTERVIEWS_DDL = """
             interview_type TEXT NOT NULL,
             type_label     TEXT,
             loop_id        TEXT,
-            occurred_date  TEXT NOT NULL,
+            scheduled_date TEXT,
+            occurred_date  TEXT,
             self_rating    INTEGER,
             notes          TEXT
         )
@@ -518,6 +536,11 @@ def _ensure_interviews_schema(conn: sqlite3.Connection) -> None:
     be re-fetched from anywhere, so they survive by construction.
     """
     conn.execute(_INTERVIEWS_DDL)
+    try:
+        conn.execute("ALTER TABLE interviews ADD COLUMN scheduled_date TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    _migrate_interviews_nullable_occurred(conn)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_interviews_job "
         "ON interviews (company, date_added, position_title, link)"
@@ -526,23 +549,70 @@ def _ensure_interviews_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_interviews_loop ON interviews (loop_id)")
 
 
-def add_interview(company: str, date_added: str, position_title: str, link: str,
-                  interview_type: str, occurred_date: str, type_label: str = "",
-                  loop_id: str = "", self_rating: Optional[int] = None,
-                  notes: str = "") -> int:
+def _migrate_interviews_nullable_occurred(conn: sqlite3.Connection) -> None:
     """
-    Records one interview round that HAPPENED. Returns the new row id.
+    Drops NOT NULL from interviews.occurred_date on databases created before
+    scheduled rounds existed.
 
-    `occurred_date` is deliberately not "scheduled date" — advancement is derived
-    from which rounds took place, so a cancelled or rescheduled invite that never
-    happened must never reach this table or it inflates the denominator.
+    CREATE TABLE IF NOT EXISTS does not alter an existing table and SQLite cannot
+    ALTER a column constraint, so the table has to be rebuilt. Caught only
+    against the live DB — every test builds a fresh one from the current DDL and
+    so never sees the old constraint.
+
+    No-op once migrated.
+    """
+    cols = conn.execute("PRAGMA table_info(interviews)").fetchall()
+    if not cols:
+        return
+    # row[1] = name, row[3] = notnull
+    if not any(row[1] == "occurred_date" and row[3] for row in cols):
+        return
+
+    conn.execute(_INTERVIEWS_DDL.replace("interviews", "interviews_migrated"))
+    conn.execute(
+        "INSERT INTO interviews_migrated (id, company, date_added, position_title, link, "
+        " interview_type, type_label, loop_id, scheduled_date, occurred_date, self_rating, notes) "
+        "SELECT id, company, date_added, position_title, link, interview_type, type_label, "
+        "       loop_id, scheduled_date, occurred_date, self_rating, notes FROM interviews"
+    )
+    conn.execute("DROP TABLE interviews")
+    conn.execute("ALTER TABLE interviews_migrated RENAME TO interviews")
+    conn.commit()
+
+
+def add_interview(company: str, date_added: str, position_title: str, link: str,
+                  interview_type: str, occurred_date: str = "", type_label: str = "",
+                  loop_id: str = "", self_rating: Optional[int] = None,
+                  notes: str = "", scheduled_date: str = "") -> int:
+    """
+    Records one interview round — booked, held, or both. Returns the new row id.
+
+    The two dates mean different things and only one of them can carry weight:
+
+      * `scheduled_date` — it is on the calendar. Says nothing about whether it
+        happens; invites get cancelled and rescheduled constantly.
+      * `occurred_date`  — it took place. ONLY this makes a round count toward
+        any outcome or rate.
+
+    A row with a scheduled_date and no occurred_date is upcoming, and
+    classify_interviews() skips it entirely: an invite is not evidence a round
+    happened, and counting it would inflate the denominator with rounds that may
+    never occur. When it does happen, set occurred_date via
+    mark_interview_occurred().
+
+    At least one date is required — a round that is neither booked nor held is
+    not an event.
     """
     if interview_type not in INTERVIEW_TYPES:
         raise ValueError(
             f"Unknown interview_type '{interview_type}'. One of: {', '.join(INTERVIEW_TYPES)}"
         )
-    if not occurred_date or not occurred_date.strip():
-        raise ValueError("occurred_date is required — only rounds that happened are logged.")
+    occurred_date = (occurred_date or "").strip()
+    scheduled_date = (scheduled_date or "").strip()
+    if not occurred_date and not scheduled_date:
+        raise ValueError(
+            "one of occurred_date (it happened) or scheduled_date (it is booked) is required."
+        )
     if self_rating is not None and not (1 <= int(self_rating) <= 5):
         raise ValueError("self_rating must be between 1 and 5, or None.")
 
@@ -550,10 +620,12 @@ def add_interview(company: str, date_added: str, position_title: str, link: str,
     try:
         cur = conn.execute(
             "INSERT INTO interviews (company, date_added, position_title, link, "
-            "interview_type, type_label, loop_id, occurred_date, self_rating, notes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "interview_type, type_label, loop_id, scheduled_date, occurred_date, "
+            "self_rating, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (company, date_added, position_title, link, interview_type,
-             type_label or None, loop_id or None, occurred_date.strip(),
+             type_label or None, loop_id or None, scheduled_date or None,
+             occurred_date or None,
              int(self_rating) if self_rating is not None else None, notes or None),
         )
         conn.commit()
@@ -596,7 +668,9 @@ def get_interviews(company: str = "", date_added: str = "", position_title: str 
                     clauses.append(f"{col} = ?")
                     params.append(val)
             query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY occurred_date ASC, id ASC"
+        # COALESCE so an upcoming round (no occurred_date) sorts by when it is
+        # booked instead of clustering at the top as a NULL.
+        query += " ORDER BY COALESCE(occurred_date, scheduled_date) ASC, id ASC"
         return [dict(r) for r in conn.execute(query, params).fetchall()]
     finally:
         conn.close()
@@ -611,7 +685,7 @@ def _unit_key(row: dict) -> tuple:
 
 def classify_interviews() -> list[dict]:
     """
-    Labels every interview round 'advanced', 'failed', or 'in_flight'.
+    Labels every interview round 'advanced', 'failed', or 'awaiting_outcome'.
 
     No verdict is ever stored, because for most rounds it is not observable — a
     rejection email after a four-round loop does not say which round lost it.
@@ -622,14 +696,17 @@ def classify_interviews() -> list[dict]:
       * last unit, job status Rejected    -> failed
       * last unit, job status Offer/Accepted -> advanced
       * last unit, job active, silent 30d+ -> ghosted (counts against the rate)
-      * last unit, job still active       -> in_flight (excluded from the rate)
+      * last unit, job still active       -> awaiting_outcome (excluded from the rate)
 
     Loops are atomic: rounds sharing a loop_id resolve together and every round
     in the loop inherits the loop's outcome. Ordering rounds inside a same-day
     onsite by date would otherwise mark the earlier ones 'advanced' for merely
     having siblings and pin the whole loop's failure on whichever one sorted last.
     """
-    rows = get_interviews()
+    # A booked-but-not-held round is not evidence of anything. Including it
+    # would put rounds that may never occur into the denominator, which is the
+    # exact error `occurred_date` exists to prevent.
+    rows = [r for r in get_interviews() if (r.get("occurred_date") or "").strip()]
     if not rows:
         return []
 
@@ -658,7 +735,7 @@ def classify_interviews() -> list[dict]:
             if i < len(ordered) - 1:
                 outcome = "advanced"
             elif status is None:
-                outcome = "in_flight"   # job row gone (link changed?) — never guess
+                outcome = "awaiting_outcome"   # job row gone (link changed?) — never guess
             elif status in TERMINAL_FAIL_STATUSES:
                 outcome = "failed"
             elif status in TERMINAL_WIN_STATUSES:
@@ -668,7 +745,7 @@ def classify_interviews() -> list[dict]:
                 # silence threshold that is a ghosting, not an open process.
                 last_seen = max(_parse_date(r["occurred_date"]) or date.min for r in unit)
                 idle = (date.today() - last_seen).days if last_seen != date.min else 0
-                outcome = "ghosted" if idle >= GHOSTED_AFTER_DAYS else "in_flight"
+                outcome = "ghosted" if idle >= GHOSTED_AFTER_DAYS else "awaiting_outcome"
             for r in unit:
                 out.append({**r, "outcome": outcome, "job_orphaned": status is None})
     return out
@@ -679,15 +756,19 @@ def interview_stats() -> dict:
     Round outcomes per interview type. The single source of this computation —
     the GUI view and the MCP tool both call it so the two can never disagree.
 
-    Rate = advanced / (advanced + failed). In-flight rounds are excluded from the
-    denominator entirely: every job's most recent round has no successor yet, so
-    counting those as failures would drag every rate down and hit whichever types
-    you interviewed for most recently the hardest.
+    Rate = advanced / (advanced + failed + ghosted). Only awaiting_outcome rounds
+    are excluded from the denominator: every job's most recent round has no
+    successor yet, so counting those as failures would drag every rate down and
+    hit whichever types you interviewed for most recently the hardest. A ghosted
+    round IS counted — it demonstrably did not advance you.
+
+    Booked-but-not-held rounds never reach this at all; classify_interviews()
+    drops them before any of it runs.
     """
     classified = classify_interviews()
 
     def blank() -> dict:
-        return {"advanced": 0, "failed": 0, "ghosted": 0, "in_flight": 0}
+        return {"advanced": 0, "failed": 0, "ghosted": 0, "awaiting_outcome": 0}
 
     by_type: dict[str, dict] = {}
     for r in classified:
@@ -699,12 +780,21 @@ def interview_stats() -> dict:
         entry["total"][r["outcome"]] += 1
         entry[bucket][r["outcome"]] += 1
 
-    def rate(c: dict) -> Optional[float]:
-        # Ghosted rounds are in the denominator: they demonstrably did not advance
-        # you. Leaving them out would compute a rate only over companies polite
-        # enough to send a rejection, which is not the population you interview with.
-        decided = c["advanced"] + c["failed"] + c["ghosted"]
-        return round(100.0 * c["advanced"] / decided, 1) if decided else None
+    def score(c: dict) -> None:
+        """
+        Adds `decided` and `rate` in place.
+
+        Ghosted rounds are in the denominator: they demonstrably did not advance
+        you. Leaving them out would compute a rate only over companies polite
+        enough to send a rejection, which is not the population you interview with.
+
+        `decided` is always reported; `rate` is withheld below
+        INTERVIEW_RATE_MIN_ROUNDS so the caller can say "0 of 2 advanced" rather
+        than print a percentage the sample cannot support.
+        """
+        c["decided"] = c["advanced"] + c["failed"] + c["ghosted"]
+        c["rate"] = (round(100.0 * c["advanced"] / c["decided"], 1)
+                     if c["decided"] >= INTERVIEW_RATE_MIN_ROUNDS else None)
 
     rows = []
     for t in INTERVIEW_TYPES:
@@ -712,7 +802,7 @@ def interview_stats() -> dict:
             continue
         e = by_type[t]
         for scope in ("total", "standalone", "loop"):
-            e[scope]["rate"] = rate(e[scope])
+            score(e[scope])
         rows.append(e)
 
     return {
@@ -722,9 +812,12 @@ def interview_stats() -> dict:
             "advanced": sum(1 for r in classified if r["outcome"] == "advanced"),
             "failed": sum(1 for r in classified if r["outcome"] == "failed"),
             "ghosted": sum(1 for r in classified if r["outcome"] == "ghosted"),
-            "in_flight": sum(1 for r in classified if r["outcome"] == "in_flight"),
+            "awaiting_outcome": sum(1 for r in classified if r["outcome"] == "awaiting_outcome"),
             "orphaned": sum(1 for r in classified if r["job_orphaned"]),
+            "decided": sum(1 for r in classified
+                           if r["outcome"] in ("advanced", "failed", "ghosted")),
         },
+        "rate_min_rounds": INTERVIEW_RATE_MIN_ROUNDS,
     }
 
 
@@ -866,3 +959,633 @@ def funnel_stats() -> dict:
                 prev = None if stage["count"] is None else stage["count"]
 
     return {"sources": data, "rate_min_denominator": RATE_MIN_DENOMINATOR}
+
+
+# --- Recruiters -------------------------------------------------------------
+# A recruiter pitches N roles, so the relationship is one-to-many and the roles
+# are ordinary job rows. What `jobs` cannot hold is the recruiter themselves:
+# sync_jobs_to_sqlite.py writes only the 12 sheet COLUMNS, so any extra column
+# on `jobs` is reset by a sync. Linkage therefore lives on the recruiter side.
+
+_RECRUITERS_DDL = """
+        CREATE TABLE IF NOT EXISTS recruiters (
+            id            INTEGER PRIMARY KEY,
+            source        TEXT NOT NULL,
+            identity      TEXT NOT NULL,
+            email         TEXT,
+            name          TEXT,
+            agency        TEXT,
+            agency_domain TEXT,
+            first_seen    TEXT NOT NULL,
+            last_seen     TEXT,
+            notes         TEXT,
+            UNIQUE (source, identity)
+        )
+"""
+
+_RECRUITER_JOBS_DDL = """
+        CREATE TABLE IF NOT EXISTS recruiter_jobs (
+            id             INTEGER PRIMARY KEY,
+            recruiter_id   INTEGER NOT NULL,
+            company        TEXT NOT NULL,
+            date_added     TEXT NOT NULL DEFAULT '',
+            position_title TEXT NOT NULL DEFAULT '',
+            link           TEXT NOT NULL DEFAULT '',
+            sourced_date   TEXT NOT NULL,
+            account        TEXT,
+            message_id     TEXT,
+            UNIQUE (recruiter_id, company, date_added, position_title, link)
+        )
+"""
+
+_RECRUITER_MESSAGES_DDL = """
+        CREATE TABLE IF NOT EXISTS recruiter_messages (
+            id            INTEGER PRIMARY KEY,
+            recruiter_id  INTEGER NOT NULL,
+            direction     TEXT NOT NULL,
+            occurred_date TEXT NOT NULL,
+            subject       TEXT,
+            account       TEXT NOT NULL DEFAULT 'primary',
+            message_id    TEXT,
+            thread_id     TEXT,
+            UNIQUE (account, message_id)
+        )
+"""
+
+# The one-way Drive export. jobs.db is gitignored and recruiter identity cannot
+# be reconstructed from the Sheet, so it needs a copy off this disk, same as
+# interviews.
+RECRUITER_COLUMNS = [
+    "source", "identity", "name", "agency", "email", "agency_domain",
+    "first_seen", "last_seen", "role_count", "reply_count", "notes",
+]
+
+RECRUITER_JOB_COLUMNS = [
+    "recruiter_identity", "recruiter_name", "recruiter_agency",
+    "company", "position_title", "sourced_date", "link", "job_status",
+]
+
+RECRUITER_SOURCES = ("email", "linkedin")
+MESSAGE_DIRECTIONS = ("inbound", "reply")
+
+# Gmail ids are per-account, so the primary and alt inboxes occupy separate id
+# spaces. Uniqueness is the pair; a bare message_id would reject a legitimate
+# alt-inbox message that happened to collide with a primary one.
+MESSAGE_ACCOUNTS = ("primary", "alt")
+
+
+def _ensure_recruiters_schema(conn: sqlite3.Connection) -> None:
+    """
+    Same rule as interviews: the job key is copied in, never referenced.
+
+    _migrate_key() rebuilds `jobs` wholesale and sync_jobs_to_sqlite.py writes
+    with INSERT OR REPLACE (delete-then-insert). Both reassign every rowid, so a
+    rowid foreign key would dangle and ON DELETE CASCADE would empty these tables
+    on a routine sync.
+    """
+    conn.execute(_RECRUITERS_DDL)
+    conn.execute(_RECRUITER_JOBS_DDL)
+    conn.execute(_RECRUITER_MESSAGES_DDL)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recruiter_jobs_job "
+        "ON recruiter_jobs (company, date_added, position_title, link)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recruiter_jobs_recruiter "
+        "ON recruiter_jobs (recruiter_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recruiter_messages_recruiter "
+        "ON recruiter_messages (recruiter_id)"
+    )
+
+
+def _slugify(value: str) -> str:
+    """Lowercase, alphanumerics and single hyphens. Empty input yields 'role'."""
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+    return slug or "role"
+
+
+def recruiter_link(source: str, identity: str, position_title: str) -> str:
+    """
+    The synthetic `link` for a recruiter-sourced role.
+
+    Recruiter roles have no posting URL, but `link` is part of the jobs primary
+    key, so two roles pitched by one recruiter on one day would collide — which
+    is exactly how one row came to be titled
+    'Frontend Engineer / Cloud Backend Engineer'.
+
+    Keying on (source, identity) rather than the raw address matters for
+    LinkedIn: InMail arrives from the shared relay inmail-hit-reply@linkedin.com,
+    so an address-keyed link would collapse every LinkedIn recruiter's roles
+    together. Deterministic by construction, so re-processing the same message
+    updates rather than duplicates.
+    """
+    return f"recruiter:{source}:{identity}/{_slugify(position_title)}"
+
+
+def upsert_recruiter(source: str, identity: str, name: str = "", agency: str = "",
+                     email: str = "", agency_domain: str = "", notes: str = "",
+                     seen_date: str = "") -> int:
+    """
+    Creates or updates one recruiter, returning its id.
+
+    Identity is (source, identity) — an address for mail, a profile slug for
+    LinkedIn — because InMail has no per-recruiter sender address. `email` is
+    stored separately and may be blank for that reason.
+
+    Only ever widens what is known: a later message with no `agency` must not
+    erase an agency learned earlier.
+    """
+    if source not in RECRUITER_SOURCES:
+        raise ValueError(
+            f"Unknown recruiter source '{source}'. One of: {', '.join(RECRUITER_SOURCES)}"
+        )
+    if not identity or not identity.strip():
+        raise ValueError("identity is required — it is half the recruiter key.")
+
+    identity = identity.strip()
+    seen = seen_date.strip() if seen_date and seen_date.strip() else ""
+    today = seen or date.today().isoformat()
+
+    conn = _connect(create=True)
+    try:
+        row = conn.execute(
+            "SELECT id FROM recruiters WHERE source = ? AND identity = ?",
+            (source, identity),
+        ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE recruiters SET "
+                "  name = COALESCE(NULLIF(?, ''), name), "
+                "  agency = COALESCE(NULLIF(?, ''), agency), "
+                "  email = COALESCE(NULLIF(?, ''), email), "
+                "  agency_domain = COALESCE(NULLIF(?, ''), agency_domain), "
+                "  notes = COALESCE(NULLIF(?, ''), notes), "
+                "  last_seen = MAX(COALESCE(last_seen, ''), ?) "
+                "WHERE id = ?",
+                (name, agency, email, agency_domain, notes, seen, row["id"]),
+            )
+            conn.commit()
+            return row["id"]
+
+        cur = conn.execute(
+            "INSERT INTO recruiters (source, identity, email, name, agency, "
+            "agency_domain, first_seen, last_seen, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (source, identity, email or None, name or None, agency or None,
+             agency_domain or None, today, today, notes or None),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def link_recruiter_job(recruiter_id: int, company: str, date_added: str,
+                       position_title: str, link: str, sourced_date: str = "",
+                       account: str = "", message_id: str = "") -> int:
+    """
+    Records that this recruiter sourced this job row. Returns the link row id.
+
+    Idempotent on the full (recruiter, job key) tuple, so re-processing a message
+    re-links rather than duplicating.
+    """
+    sourced = sourced_date.strip() if sourced_date and sourced_date.strip() \
+        else date.today().isoformat()
+    conn = _connect(create=True)
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO recruiter_jobs (recruiter_id, company, date_added, "
+            "position_title, link, sourced_date, account, message_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (recruiter_id, company, date_added, position_title, link, sourced,
+             account or None, message_id or None),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id FROM recruiter_jobs WHERE recruiter_id = ? AND company = ? "
+            "AND date_added = ? AND position_title = ? AND link = ?",
+            (recruiter_id, company, date_added, position_title, link),
+        ).fetchone()
+        return row["id"] if row else 0
+    finally:
+        conn.close()
+
+
+def record_recruiter_message(recruiter_id: int, direction: str, occurred_date: str,
+                             subject: str = "", account: str = "primary",
+                             message_id: str = "", thread_id: str = "") -> int:
+    """
+    Records one message to or from a recruiter. Returns the row id.
+
+    Idempotent on (account, message_id) so a re-run records nothing new.
+    """
+    if direction not in MESSAGE_DIRECTIONS:
+        raise ValueError(
+            f"direction must be one of: {', '.join(MESSAGE_DIRECTIONS)}"
+        )
+    if not occurred_date or not occurred_date.strip():
+        raise ValueError("occurred_date is required.")
+    account = account or "primary"
+
+    conn = _connect(create=True)
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO recruiter_messages (recruiter_id, direction, "
+            "occurred_date, subject, account, message_id, thread_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (recruiter_id, direction, occurred_date.strip(), subject or None,
+             account, message_id or None, thread_id or None),
+        )
+        conn.execute(
+            "UPDATE recruiters SET last_seen = MAX(COALESCE(last_seen, ''), ?) WHERE id = ?",
+            (occurred_date.strip(), recruiter_id),
+        )
+        conn.commit()
+        if message_id:
+            row = conn.execute(
+                "SELECT id FROM recruiter_messages WHERE account = ? AND message_id = ?",
+                (account, message_id),
+            ).fetchone()
+            return row["id"] if row else 0
+        return conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+    finally:
+        conn.close()
+
+
+def get_recruiters() -> list[dict]:
+    """
+    Every recruiter with their role count and last contact, most recent first.
+
+    The role count comes from recruiter_jobs, not from `jobs`, so a role whose
+    job row was deleted still shows the recruiter as known.
+    """
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT r.*, "
+            "  (SELECT COUNT(*) FROM recruiter_jobs j WHERE j.recruiter_id = r.id) "
+            "    AS role_count, "
+            "  (SELECT COUNT(*) FROM recruiter_messages m "
+            "    WHERE m.recruiter_id = r.id AND m.direction = 'reply') AS reply_count "
+            "FROM recruiters r "
+            "ORDER BY COALESCE(r.last_seen, r.first_seen) DESC, r.id DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_recruiter_jobs(recruiter_id: Optional[int] = None) -> list[dict]:
+    """
+    Recruiter-sourced roles, newest first, joined to the live job row.
+
+    LEFT JOIN on purpose: a link whose job row has since been deleted or re-keyed
+    still lists, with nulls for the job columns. Silently dropping it would hide
+    exactly the breakage worth seeing.
+    """
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        query = (
+            "SELECT rj.*, r.name AS recruiter_name, r.agency AS recruiter_agency, "
+            "       r.source AS recruiter_source, r.identity AS recruiter_identity, "
+            "       j.status AS job_status, j.notes AS job_notes "
+            "FROM recruiter_jobs rj "
+            "JOIN recruiters r ON r.id = rj.recruiter_id "
+            "LEFT JOIN jobs j ON j.company = rj.company AND j.date_added = rj.date_added "
+            "  AND j.position_title = rj.position_title AND j.link = rj.link"
+        )
+        params: list = []
+        if recruiter_id is not None:
+            query += " WHERE rj.recruiter_id = ?"
+            params.append(recruiter_id)
+        query += " ORDER BY rj.sourced_date DESC, rj.id DESC"
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+    finally:
+        conn.close()
+
+
+def get_recruiter_messages(recruiter_id: Optional[int] = None) -> list[dict]:
+    """Messages to and from recruiters, oldest first."""
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        query = "SELECT * FROM recruiter_messages"
+        params: list = []
+        if recruiter_id is not None:
+            query += " WHERE recruiter_id = ?"
+            params.append(recruiter_id)
+        query += " ORDER BY occurred_date ASC, id ASC"
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+    finally:
+        conn.close()
+
+
+# A recruiter-sourced row is one whose link is a CONVERSATION rather than a job
+# posting: inbound outreach arrives as a message, whereas a posting URL means
+# Joel went looking. Earlier drafts matched company strings too ('%agency%',
+# '%via %') and both patterns produced false positives on real rows — OLIVER
+# Agency and LMD Agency are ApplyPass applications to real employers, and the
+# AustinWorks and Venture Up rows are postings Joel applied to that happen to be
+# agency-placed. Company names are prose; link shape is structural.
+_CONVERSATION_LINKS = ("recruiter:%", "mailto:%", "%linkedin.com/messaging%")
+
+
+def _coverage_tier(status: str) -> int:
+    """
+    0 = live at a screening stage, 1 = ordinary, 2 = closed.
+
+    Sorting by raw progress would rank Rejected above Tracking, which inverts
+    the urgency this list exists to show: an uncaptured role still at a screen
+    is a live relationship that is invisible, while an uncaptured Rejected one
+    is bookkeeping.
+    """
+    s = (status or "").strip().lower()
+    if s in SCREEN_STATUSES:
+        return 0
+    if s in TERMINAL_FAIL_STATUSES or s in TERMINAL_WIN_STATUSES:
+        return 2
+    return 1
+
+
+def unlinked_recruiter_rows() -> list[dict]:
+    """
+    Job rows that look recruiter-sourced but are linked to no recruiter.
+
+    Heuristic, and deliberately tuned tight. A miss is invisible and costs
+    nothing — the row stays untracked exactly as it is today. A false positive
+    is visible on the Insights card, and a handful of them teach you to ignore
+    the whole thing. So this accepts misses to buy precision.
+
+    Auto-apply imports are excluded outright: an ApplyPass row is by definition
+    an application Joel submitted, not outreach he received.
+    """
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        link_clause = " OR ".join("j.link LIKE ?" for _ in _CONVERSATION_LINKS)
+        rows = conn.execute(
+            f"SELECT j.company, j.date_added, j.position_title, j.link, j.status, "
+            f"       j.notes, j.date_applied "
+            f"FROM jobs j "
+            f"WHERE ({link_clause}) "
+            f"  AND COALESCE(j.notes, '') NOT LIKE '%auto-apply export%' "
+            f"  AND NOT EXISTS (SELECT 1 FROM recruiter_jobs rj "
+            f"                  WHERE rj.company = j.company AND rj.date_added = j.date_added "
+            f"                    AND rj.position_title = j.position_title AND rj.link = j.link)",
+            list(_CONVERSATION_LINKS),
+        ).fetchall()
+        out = [dict(r) for r in rows]
+        out.sort(key=lambda r: (_coverage_tier(r["status"]), _neg_date(r["date_added"])))
+        return out
+    finally:
+        conn.close()
+
+
+def _neg_date(value: str) -> str:
+    """Sort key that puts newer dates first inside a tier."""
+    return "".join(chr(255 - ord(c)) for c in (value or ""))
+
+
+def recruiter_coverage() -> dict:
+    """
+    Two counts, never a ratio.
+
+    A coverage percentage would need a known denominator, and this one is a
+    heuristic that errs in both directions. Worse, the ratio would IMPROVE as
+    the heuristic got stricter — tightening the patterns shrinks the denominator
+    without capturing a single extra row. Two integers say the same thing
+    without claiming a total that cannot be computed, which is the rule
+    funnel_stats() already follows for unmeasured stages.
+    """
+    unlinked = unlinked_recruiter_rows()
+    conn = _connect()
+    captured = 0
+    if conn:
+        try:
+            captured = conn.execute("SELECT COUNT(*) AS n FROM recruiter_jobs").fetchone()["n"]
+        finally:
+            conn.close()
+    return {"captured": captured, "suspected_uncaptured": len(unlinked), "rows": unlinked}
+
+
+# --- Job-level silence ------------------------------------------------------
+# Silence after a conversation is not the same event as silence after a blind
+# submission. A recruiter who wrote and went quiet DISENGAGED; a portal
+# application nobody answered was never engaged with in the first place, and for
+# an auto-submitted one that is the ordinary outcome rather than a signal.
+# Collapsing the two would make 'ghosted' a synonym for "applied and waiting"
+# and hand the label to the ~354 auto-submitted rows.
+
+# A blind application needs far longer than a live conversation before silence
+# means anything — ATS pipelines routinely take a month.
+NO_RESPONSE_AFTER_DAYS = 30
+
+
+def _relationship_index(conn: sqlite3.Connection) -> dict:
+    """
+    Job keys that carry evidence of a two-way relationship, with the date of the
+    most recent evidence.
+
+    Built as two set queries rather than per-job lookups: classify_job_silence()
+    runs over every open row, and a per-row query would be ~1000 round trips.
+    """
+    index: dict[tuple, str] = {}
+
+    def note(key: tuple, when: str, kind: str, out: dict) -> None:
+        prev = out.get(key)
+        if prev is None or (when or "") > prev[0]:
+            out[key] = ((when or ""), kind)
+
+    staged: dict[tuple, tuple] = {}
+    for r in conn.execute(
+        "SELECT company, date_added, position_title, link, occurred_date FROM interviews"
+    ):
+        note((r["company"], r["date_added"], r["position_title"], r["link"]),
+             r["occurred_date"], "interview", staged)
+
+    for r in conn.execute(
+        "SELECT rj.company, rj.date_added, rj.position_title, rj.link, "
+        "       MAX(rm.occurred_date) AS occurred_date "
+        "FROM recruiter_jobs rj "
+        "JOIN recruiter_messages rm ON rm.recruiter_id = rj.recruiter_id "
+        "GROUP BY rj.company, rj.date_added, rj.position_title, rj.link"
+    ):
+        note((r["company"], r["date_added"], r["position_title"], r["link"]),
+             r["occurred_date"], "recruiter_message", staged)
+
+    index.update(staged)
+    return index
+
+
+def _idle_days(since: str) -> Optional[int]:
+    d = _parse_date(since)
+    return None if d is None else (date.today() - d).days
+
+
+def classify_job_silence() -> list[dict]:
+    """
+    Labels every OPEN job 'ghosted', 'no_response' or 'waiting'.
+
+    Rows with neither a date_applied nor a relationship signal are omitted
+    entirely rather than labelled: a `Tracking` row is not awaiting a reply, and
+    calling it silent would count a decision nobody ever made. That is the rule
+    funnel_stats() already applies to unmeasured stages — an unknown must not be
+    rendered as a zero.
+
+    Derived, never stored. A stored verdict would go stale the moment a reply
+    arrived, and nothing in the write path would clear it.
+    """
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        rel = _relationship_index(conn)
+    finally:
+        conn.close()
+
+    out = []
+    for job in get_all_jobs():
+        status = (job.get("status") or "").strip().lower()
+        if status in TERMINAL_FAIL_STATUSES or status in TERMINAL_WIN_STATUSES:
+            continue
+
+        key = (job.get("company"), job.get("date_added"),
+               job.get("position_title") or "", job.get("link") or "")
+        applied = (job.get("date_applied") or "").strip()
+
+        event_date, signal = rel.get(key, ("", ""))
+        if not signal and status in SCREEN_STATUSES:
+            # A screening status implies a human engaged even where no round was
+            # logged — 8 of the 10 current screens have no `interviews` row.
+            signal = "screening_status"
+
+        if signal:
+            # The clock runs from the newest relationship evidence; fall back to
+            # the application, then to when the row was created.
+            since = event_date or applied or (job.get("date_added") or "")
+            idle = _idle_days(since)
+            state = "ghosted" if idle is not None and idle >= GHOSTED_AFTER_DAYS else "waiting"
+        elif applied:
+            idle = _idle_days(applied)
+            since = applied
+            state = ("no_response" if idle is not None and idle >= NO_RESPONSE_AFTER_DAYS
+                     else "waiting")
+        else:
+            continue  # not awaiting anything
+
+        out.append({
+            "company": job.get("company"),
+            "date_added": job.get("date_added"),
+            "position_title": job.get("position_title"),
+            "link": job.get("link"),
+            "status": job.get("status"),
+            "state": state,
+            # Which test fired, so a classification can be audited rather than
+            # taken on faith.
+            "signal": signal or "application",
+            "since": since,
+            "idle_days": idle,
+            "auto_applied": any(m in (job.get("notes") or "").lower() for m in _AUTO_MARKERS),
+        })
+
+    out.sort(key=lambda r: -(r["idle_days"] or 0))
+    return out
+
+
+def job_silence_stats() -> dict:
+    """
+    Counts per state, split hand vs auto the way funnel_stats() splits sources.
+
+    Auto-submitted rows are included: an unanswered application is unanswered
+    whoever clicked submit. They are counted separately because they behave
+    differently — no contact by construction, and no follow-up action available.
+    """
+    rows = classify_job_silence()
+    out = {"ghosted": {"hand": 0, "auto": 0}, "no_response": {"hand": 0, "auto": 0},
+           "waiting": {"hand": 0, "auto": 0}}
+    for r in rows:
+        out[r["state"]]["auto" if r["auto_applied"] else "hand"] += 1
+    for state in out:
+        out[state]["total"] = out[state]["hand"] + out[state]["auto"]
+    return {
+        "counts": out,
+        "ghosted_rows": [r for r in rows if r["state"] == "ghosted"],
+        "no_response_rows": [r for r in rows if r["state"] == "no_response"],
+        "ghosted_after_days": GHOSTED_AFTER_DAYS,
+        "no_response_after_days": NO_RESPONSE_AFTER_DAYS,
+    }
+
+
+def upcoming_interviews(include_past: bool = False) -> list[dict]:
+    """
+    Rounds that are booked but have not happened yet, soonest first.
+
+    This is what "in flight" means in ordinary speech, and until now it had
+    nowhere to live: two real calls were sitting in free-text `notes` where no
+    query could see them.
+
+    A scheduled round that is already in the past and still has no
+    `occurred_date` is either forgotten paperwork or a call that never happened.
+    `include_past=True` surfaces those, because silently hiding them is how the
+    interview log drifts out of sync with reality.
+    """
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT * FROM interviews "
+            "WHERE COALESCE(scheduled_date, '') <> '' AND COALESCE(occurred_date, '') = '' "
+            "ORDER BY scheduled_date ASC, id ASC"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    today = date.today()
+    out = []
+    for r in rows:
+        row = dict(r)
+        when = _parse_date(row["scheduled_date"])
+        row["days_away"] = (when - today).days if when else None
+        row["overdue"] = row["days_away"] is not None and row["days_away"] < 0
+        if row["overdue"] and not include_past:
+            continue
+        out.append(row)
+    return out
+
+
+def mark_interview_occurred(interview_id: int, occurred_date: str = "") -> bool:
+    """
+    Promotes a booked round to one that happened. Returns False if the id is
+    unknown or the round already has an occurred_date.
+
+    Defaults to the scheduled date, since the overwhelmingly common case is a
+    call that ran when it was booked to run.
+    """
+    conn = _connect()
+    if not conn:
+        return False
+    try:
+        row = conn.execute(
+            "SELECT scheduled_date, occurred_date FROM interviews WHERE id = ?",
+            (interview_id,),
+        ).fetchone()
+        if not row or (row["occurred_date"] or "").strip():
+            return False
+        when = (occurred_date or "").strip() or (row["scheduled_date"] or "").strip()
+        if not when:
+            return False
+        conn.execute("UPDATE interviews SET occurred_date = ? WHERE id = ?", (when, interview_id))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
