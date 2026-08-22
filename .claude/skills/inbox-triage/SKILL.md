@@ -71,7 +71,22 @@ python3 -c "import time; print(int(time.time()))"
 Search each inbox with `after:<its own watermark>` (Gmail accepts epoch seconds),
 `maxResults: 100`. Pre-split wide windows into ~6h slices; a single wide search times out.
 
+**Always append `-from:linkedin.com` to the primary query.** A Gmail filter forwards LinkedIn
+mail from `ajoelcrist@` into `joelchristabreu4044+linkedin@gmail.com`, so Joel sees it in the
+inbox he actually reads. Triage must ignore those copies: it reads the originals through
+`gmail_alt`, and the forwarded duplicate is the *same conversation* arriving a second time.
+The `thread:<id>` key cannot catch it — Gmail message and thread ids are per-account, so the
+two copies look like unrelated threads and would earn two tasks for one recruiter.
+
+Exclude on the **sender**, not the recipient. Gmail preserves the original `To:` header when
+it forwards, so the forwarded copy still reads `To: ajoelcrist@gmail.com` and
+`-to:joelchristabreu4044+linkedin@gmail.com` would quietly match nothing. `deliveredto:` is
+the precise operator if a recipient test is ever needed, but sender exclusion is simpler and
+costs nothing: native LinkedIn mail reaching the primary inbox is job-alert `noise` anyway.
+
 If more than 100 come back for a slice, narrow it further — never silently drop the overflow.
+This is not theoretical: a 60-result cap once hid Kim Hanson's *"please send an updated
+resume"* for four days.
 
 **Group before reading anything.** The search results include Joel's own sent mail, which is
 what makes this free:
