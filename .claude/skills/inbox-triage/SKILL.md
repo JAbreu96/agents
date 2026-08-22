@@ -57,9 +57,16 @@ Assign each message exactly one category.
 | `deadline` | Something has a clock: assessment expiry, incomplete application, scheduled interview | Task |
 | `rejection` | "not moving forward", "other candidates", "regret to inform", "decided not to" | Tracker write, silent |
 | `auto_ack` | "Thank you for applying", "we've received your application", Indeed/Workday/Greenhouse receipts | Tracker write if untracked, else nothing |
+| `recruiter_outreach` | A staffing/agency recruiter mass-pitching a role Joel never applied to | Tracker row, silent — no task |
 | `noise` | Job alerts, marketing, newsletters, Glassdoor/Dice/LinkedIn digests, security codes | Ignore entirely |
 
 **Identifying a human:** a named sender at a company domain, writing prose addressed to Joel, expecting a reply. Not `no-reply@`, `noreply@`, `notifications@`, `donotreply@`, and not an ATS template even when it carries a person's name in the signature. When genuinely unsure, treat as `human_action` — a spurious task costs seconds, a missed interview request costs an opportunity.
+
+**`human_action` vs `recruiter_outreach`.** Both come from a real person, so the split is about whether Joel is already in a process. `human_action` refers to something Joel did — his application, his interview, a question he must answer — and reaching a human is the only way it moves. `recruiter_outreach` pitches a role he never applied to, and is usually blasted to a list.
+
+The mechanical tells of a blast are an unsubscribe link, a tracking pixel, and a body that never references Joel's background. Any one of them, on mail pitching an unsolicited role, makes it `recruiter_outreach`. Record it and stay silent: these arrive most days, are rarely a fit, and a task for each rebuilds the inbox this skill exists to quiet.
+
+Two things override that and make it `human_action` — a reply within a thread Joel started, and any request that names him specifically (an interview time, a document, a question only he can answer).
 
 A rejection sent by a real person is still a `rejection` (silent). It needs no reply.
 
@@ -70,7 +77,26 @@ A rejection sent by a real person is still a `rejection` (silent). It needs no r
 For every `rejection` and every status-advancing `human_action`/`deadline`:
 
 1. Extract the company and the role title as quoted in the email.
+
+   **Unescape HTML entities first.** Most of this mail is HTML, so an ampersand
+   arrives as `&amp;` and quotes as `&quot;` / `&#39;`. Passing those through
+   corrupts the tracker: `add_job` silently creates a row titled
+   `Software Verification &amp; QA Specialist`, which then matches nothing and has
+   to be repaired by hand. `update_job_status` at least fails loudly. Convert to
+   the literal characters before any lookup or write — the stored title must read
+   `Systems Integration & Validation Engineer`, never the escaped form.
 2. Call `mcp__job_tracker__find_job_for_email` with `company` and `title_hint`.
+
+   **Always pass the title.** Without one, a company with a single row returns
+   `exact` for whatever that row happens to be — which is not necessarily the role
+   the email is about. An ALTEN rejection for *IT/OT Engineer* resolved `exact`
+   onto their *ADAS Performance Engineer* row purely because that was the only row
+   filed under the sender's company string.
+
+   If the title returns `none`, try a **shorter company string** before giving up.
+   The ATS name and the tracked name often differ: that same IT/OT row was filed
+   under `ALTEN SA` while the email said `ALTEN Technology USA`, and searching
+   `ALTEN` with the title found it exactly.
 3. Act on the result:
 
 | `match` | Action |
@@ -81,6 +107,16 @@ For every `rejection` and every status-advancing `human_action`/`deadline`:
 | `none` + it is human/deadline | `mcp__job_tracker__add_job` to create the row, then proceed. Auto-apply submits roles that never reach the tracker; an interview request for an unknown company is exactly the case worth capturing. |
 
 Status mapping: interview scheduled/requested → `Phone Screen`; rejection → `Rejected`; receipt for an untracked role → `Applied`.
+
+**`recruiter_outreach`** always creates a row rather than updating one, since the role
+is by definition untracked: status `Tracking` (Joel has not applied), the recruiter's
+name and address in `contacts`, and a note saying it came from inbound outreach. If the
+same firm pitches again, add a row for the new role — do not overwrite the old one.
+
+**Never advance a status on a message you cannot read.** Indeed and some ATS portals
+send "you have a new message" with the body behind a login. That is a `human_action`
+worth a task, but the row stays where it is: the hidden text may be an interview
+request or a rejection, and guessing either way is a silent wrong write.
 
 ---
 
