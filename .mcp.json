@@ -10,6 +10,14 @@
       "command": "npx",
       "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"]
     },
+    "gmail_alt": {
+      "command": "npx",
+      "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"],
+      "env": {
+        "GMAIL_OAUTH_PATH": "${HOME}/.gmail-mcp/gcp-oauth.keys.json",
+        "GMAIL_CREDENTIALS_PATH": "${HOME}/.gmail-mcp/credentials-alt.json"
+      }
+    },
     "gtasks": {
       "command": "npx",
       "args": ["-y", "@alvincrave/gtasks-mcp@0.2.0"],
