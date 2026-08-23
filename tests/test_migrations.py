@@ -143,6 +143,7 @@ def test_archived_column_is_added_and_defaults_to_zero(legacy):
 def test_jobs_migration_is_idempotent(legacy):
     legacy(JOBS_V1, rows=[("Acme", "2026-01-01", "Engineer", "http://x/1", "Applied")])
     for _ in range(3):
+        jobs_db._reset_schema_cache()  # force the migration to actually re-run
         jobs_db._connect()
     assert len(jobs_db.get_all_jobs()) == 1
 
@@ -193,6 +194,7 @@ def test_interviews_migration_is_idempotent(legacy):
     legacy(JOBS_V2, INTERVIEWS_V1, interview_rows=[
         ("Acme", "2026-01-01", "Engineer", "http://x/1", "technical", "2026-02-01")])
     for _ in range(3):
+        jobs_db._reset_schema_cache()  # force the migration to actually re-run
         jobs_db._connect()
     assert len(jobs_db.get_interviews()) == 1
 

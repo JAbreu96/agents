@@ -82,9 +82,33 @@ def _migrate_key(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _ensure_schema(conn: sqlite3.Connection) -> None:
-    conn.execute("PRAGMA journal_mode=WAL")
+# Schema setup is idempotent but not free. Against local SQLite a redundant
+# CREATE TABLE IF NOT EXISTS costs nothing, so it ran on every connection — and
+# an /insights render opens eleven. That is 220 schema statements to serve 12
+# data reads. Local: 83ms, invisible. Against a remote database every one of
+# those is a round trip, which is roughly nine seconds a page.
+#
+# Keyed by resolved path rather than a bare boolean so tests, which point
+# DB_PATH at a fresh tmp file per test, still get their schema built.
+_SCHEMA_ENSURED: set[str] = set()
+
+
+def _reset_schema_cache() -> None:
+    """Forces the next connection to re-run schema setup. For tests that need to
+    prove a migration is idempotent across runs, not merely skipped."""
+    _SCHEMA_ENSURED.clear()
+
+
+def _ensure_schema(conn: sqlite3.Connection, path: Optional[str] = None) -> None:
+    # busy_timeout is per-connection, so it is set every time regardless. It is
+    # one statement; the other twenty are what this guard exists to skip.
     conn.execute("PRAGMA busy_timeout=5000")
+    if path is not None and path in _SCHEMA_ENSURED:
+        return
+
+    # journal_mode is a property of the database file, not the connection, so it
+    # only needs setting when we actually touch the schema.
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(_JOBS_DDL.format(table="jobs"))
     try:
         conn.execute("ALTER TABLE jobs ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
@@ -96,6 +120,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     _ensure_interviews_schema(conn)
     _ensure_recruiters_schema(conn)
     conn.execute(_META_DDL)
+    if path is not None:
+        _SCHEMA_ENSURED.add(path)
 
 
 def _connect(create: bool = False) -> Optional[sqlite3.Connection]:
@@ -105,7 +131,7 @@ def _connect(create: bool = False) -> Optional[sqlite3.Connection]:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    _ensure_schema(conn)
+    _ensure_schema(conn, path)
     return conn
 
 
