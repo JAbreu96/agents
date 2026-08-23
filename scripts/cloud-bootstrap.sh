@@ -26,23 +26,32 @@ set -euo pipefail
 # were originally granted, or the refresh returns invalid_scope.
 GMAIL_SCOPE="https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.settings.basic"
 
-# gtasks needs no files. Unlike the Gmail server, @alvincrave/gtasks-mcp accepts
-# GOOGLE_CLIENT_ID / _SECRET / _REFRESH_TOKEN directly, and .mcp.json maps the
-# GTASKS_* variables below onto them. Verified against the real server with HOME
-# pointed at an empty directory, so there was nothing on disk to fall back to.
+# Only the file-backed credentials are checked here, and the reason is the
+# environment's split personality:
 #
-# Those three are only read here to fail early if they are missing; the run
-# script inherits them from the environment and never touches them.
+#   Setup script   -- runs BEFORE Claude Code launches, so it is the only place
+#                     that can create files ahead of the MCP servers reading
+#                     them. But a cloud environment's "Environment variables"
+#                     field is NOT injected into it (anthropics/claude-code
+#                     #55440, closed as not planned), so its secrets must be
+#                     exported inline in the script itself.
+#   Session env    -- gets the Environment variables field, which is where
+#                     TURSO_* and GTASKS_* live. Those reach .mcp.json's
+#                     ${VAR:-} expansion and jobs_db at run time.
+#
+# So this script runs in the setup phase and must not require the session-time
+# variables: they legitimately do not exist yet. Requiring them here would fail
+# every cloud run with a misleading "missing required variable".
+#
+# gtasks needs no files at all. @alvincrave/gtasks-mcp accepts GOOGLE_CLIENT_ID /
+# _SECRET / _REFRESH_TOKEN directly, and .mcp.json maps GTASKS_* onto them.
+# Verified against the real server with HOME pointed at an empty directory, so
+# nothing on disk could have been the source.
 REQUIRED=(
   GMAIL_OAUTH_KEYS
   GMAIL_REFRESH_TOKEN
   GMAIL_ALT_REFRESH_TOKEN
-  GTASKS_CLIENT_ID
-  GTASKS_CLIENT_SECRET
-  GTASKS_REFRESH_TOKEN
   GCP_SERVICE_ACCOUNT
-  TURSO_DATABASE_URL
-  TURSO_AUTH_TOKEN
 )
 
 missing=()
@@ -103,8 +112,9 @@ write_token_file "$HOME/.gmail-mcp/credentials.json"             GMAIL_REFRESH_T
 write_token_file "$HOME/.gmail-mcp/credentials-alt.json"         GMAIL_ALT_REFRESH_TOKEN "$GMAIL_SCOPE"
 write_json_var   "$HOME/.config/agents/gcp-service-account.json" GCP_SERVICE_ACCOUNT
 
-# The MCP servers read this path from the environment; the run scripts and
-# jobs_db read TURSO_* directly, which are already exported by the Routine.
+# .mcp.json points gsheets at this path literally, so the export only matters for
+# anything invoked from here. TURSO_* is not our concern: it comes from the
+# Environment variables field straight into the session.
 export GOOGLE_APPLICATION_CREDENTIALS="$HOME/.config/agents/gcp-service-account.json"
 
 echo "cloud-bootstrap: wrote 4 credential files (gtasks authenticates from the environment)"

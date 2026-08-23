@@ -1,5 +1,39 @@
 {
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true
+  },
+  "permissions": {
+    "deny": [
+      "mcp__gmail_personal__send_email",
+      "mcp__gmail_personal__delete_email",
+      "mcp__gmail_personal__batch_delete_emails",
+      "mcp__gmail_alt__send_email",
+      "mcp__gmail_alt__draft_email",
+      "mcp__gmail_alt__delete_email",
+      "mcp__gmail_alt__batch_delete_emails",
+      "mcp__gtasks__delete",
+      "mcp__gtasks__clear",
+      "mcp__gtasks_alt__delete",
+      "mcp__gtasks_alt__clear"
+    ],
+    "allow": [
+      "mcp__gmail_personal__search_emails",
+      "mcp__gmail_personal__read_email",
+      "mcp__gmail_personal__draft_email",
+      "mcp__gmail_alt__search_emails",
+      "mcp__gmail_alt__read_email",
+      "mcp__job_tracker__find_job_for_email",
+      "mcp__job_tracker__update_job_status",
+      "mcp__job_tracker__update_notes",
+      "mcp__job_tracker__add_job",
+      "mcp__job_tracker__record_recruiter_outreach",
+      "mcp__job_tracker__record_recruiter_reply",
+      "mcp__job_tracker__list_recruiters",
+      "mcp__job_tracker__list_all_jobs",
+      "mcp__gtasks__list",
+      "mcp__gtasks__list_task_lists",
+      "mcp__gtasks__create",
+      "mcp__gtasks__update"
+    ]
   }
 }
