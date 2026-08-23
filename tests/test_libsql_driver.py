@@ -172,3 +172,37 @@ def test_full_schema_builds_on_libsql(tmp_path, monkeypatch):
         "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     assert {"jobs", "interviews", "recruiters", "recruiter_jobs",
             "recruiter_messages", "meta"} <= tables
+
+
+def test_a_merge_updates_in_place_on_libsql(tmp_path, monkeypatch):
+    """
+    The ApplyPass importer reports how many rows it merged from
+    update_job_fields' return value, which is `cur.rowcount > 0`. libSQL is a
+    different client, and a cursor that did not populate rowcount would make
+    every successful merge report as zero rows updated -- the number the
+    applypass-inbound skill checks the row delta against.
+    """
+    monkeypatch.setenv("TURSO_DATABASE_URL", str(tmp_path / "cloud.db"))
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    jobs_db._reset_schema_cache()
+
+    key = dict(company="Acme", date_added="2026-01-01",
+               position_title="Engineer", link="https://x/1")
+    jobs_db.upsert_job({**key, "job_summary": "", "location": "", "contacts": "rec@acme.com",
+                        "notes": "", "outreach_date": "2026-02-02", "date_applied": "",
+                        "status": "Phone Screen", "followup_log": ""})
+
+    assert jobs_db.update_job_fields(
+        key["company"], key["date_added"], {"location": "Texas"},
+        position_title=key["position_title"], link=key["link"])
+
+    rows = jobs_db.get_all_jobs(include_archived=True)
+    assert len(rows) == 1, "a merge must update in place, never insert"
+    assert rows[0]["location"] == "Texas"
+    assert rows[0]["contacts"] == "rec@acme.com"
+    assert rows[0]["status"] == "Phone Screen"
+
+    # A miss must report False, or the importer would overcount silently.
+    assert not jobs_db.update_job_fields(
+        "Nobody", "2026-01-01", {"location": "Texas"},
+        position_title="Engineer", link="https://x/nope")
