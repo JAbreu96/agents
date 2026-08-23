@@ -90,6 +90,86 @@ def _migrate_key(conn: sqlite3.Connection) -> None:
 #
 # Keyed by resolved path rather than a bare boolean so tests, which point
 # DB_PATH at a fresh tmp file per test, still get their schema built.
+# --- Driver -----------------------------------------------------------------
+# The pipeline runs as cloud Routines against a remote libSQL/Turso database,
+# but local development and the whole test suite stay on plain SQLite. The
+# driver is chosen by environment, and with TURSO_DATABASE_URL unset nothing
+# about the SQLite path changes.
+#
+# libSQL is NOT a drop-in for sqlite3 despite the marketing. It returns plain
+# tuples and `conn.row_factory` does not exist at all -- accessing it raises
+# AttributeError. This codebase indexes rows by name in 146 places, so the shim
+# below rebuilds sqlite3.Row semantics from cursor.description, which libSQL
+# does provide.
+
+def _use_libsql() -> bool:
+    return bool(os.environ.get("TURSO_DATABASE_URL", "").strip())
+
+
+# libSQL raises bare ValueError for SQL errors -- not sqlite3.OperationalError,
+# not even its own libsql.Error. _ensure_schema relies on a duplicate-column
+# ALTER TABLE failing predictably, so both have to be caught.
+_SCHEMA_EXC: tuple = (sqlite3.OperationalError, ValueError)
+
+
+class _ShimRow(dict):
+    """
+    A row that behaves like sqlite3.Row for the patterns this codebase uses:
+    name indexing, positional indexing, dict() conversion, and .keys().
+    """
+
+    def __init__(self, columns, values):
+        super().__init__(zip(columns, values))
+        self._values = tuple(values)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return super().__getitem__(key)
+
+    def keys(self) -> list:
+        return list(super().keys())
+
+
+class _ShimCursor:
+    """Wraps a libSQL cursor so its rows come back as _ShimRow."""
+
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def _wrap(self, row):
+        if row is None:
+            return None
+        return _ShimRow([d[0] for d in self._cursor.description], row)
+
+    def fetchone(self):
+        return self._wrap(self._cursor.fetchone())
+
+    def fetchall(self) -> list:
+        return [self._wrap(r) for r in self._cursor.fetchall()]
+
+    def __iter__(self):
+        # libSQL cursors are not iterable, so materialise. Only two callers
+        # iterate a cursor directly, both in _relationship_index.
+        return iter(self.fetchall())
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class _ShimConnection:
+    """Wraps a libSQL connection so execute() yields shimmed cursors."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, *args, **kwargs) -> _ShimCursor:
+        return _ShimCursor(self._conn.execute(*args, **kwargs))
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
 _SCHEMA_ENSURED: set[str] = set()
 
 
@@ -112,7 +192,7 @@ def _ensure_schema(conn: sqlite3.Connection, path: Optional[str] = None) -> None
     conn.execute(_JOBS_DDL.format(table="jobs"))
     try:
         conn.execute("ALTER TABLE jobs ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
-    except sqlite3.OperationalError:
+    except _SCHEMA_EXC:
         pass  # column already exists
     _migrate_key(conn)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_company ON jobs (company)")
@@ -124,7 +204,25 @@ def _ensure_schema(conn: sqlite3.Connection, path: Optional[str] = None) -> None
         _SCHEMA_ENSURED.add(path)
 
 
-def _connect(create: bool = False) -> Optional[sqlite3.Connection]:
+def _connect(create: bool = False):
+    """
+    Opens a connection, building the schema on first use for this path.
+
+    `create` only means anything for SQLite, where a missing file is a real
+    signal that nothing has been written yet. A remote database always exists,
+    so the check is skipped there.
+    """
+    if _use_libsql():
+        import libsql  # imported lazily: unset TURSO_DATABASE_URL needs no dependency
+
+        url = os.environ["TURSO_DATABASE_URL"].strip()
+        token = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+        conn = _ShimConnection(
+            libsql.connect(url, auth_token=token) if token else libsql.connect(url)
+        )
+        _ensure_schema(conn, url)
+        return conn
+
     path = os.path.abspath(DB_PATH)
     if not create and not os.path.exists(path):
         return None
@@ -564,7 +662,7 @@ def _ensure_interviews_schema(conn: sqlite3.Connection) -> None:
     conn.execute(_INTERVIEWS_DDL)
     try:
         conn.execute("ALTER TABLE interviews ADD COLUMN scheduled_date TEXT")
-    except sqlite3.OperationalError:
+    except _SCHEMA_EXC:
         pass  # column already exists
     _migrate_interviews_nullable_occurred(conn)
     conn.execute(

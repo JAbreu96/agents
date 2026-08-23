@@ -9,3 +9,9 @@ anthropic
 flask
 pypdf
 reportlab
+
+# Remote database driver for the cloud pipeline. Only imported when
+# TURSO_DATABASE_URL is set, so local development does not need it.
+# Pinned exactly: the package ships no __version__ and the ecosystem has
+# three competing clients with different sync models.
+libsql==0.1.11
