@@ -19,6 +19,18 @@ print(f'{len(d)} records, {sum(1 for r in d if r.get(\"_api_c2_application_submi
 
 An empty inbox (`[]`) means the user has not pasted yet — say so and stop. Offer to open it: `code data/applied_inbox.json`.
 
+The inbox has a second source: the **ApplyPass Capture** DevTools panel
+(`browser_extension/applypass_capture/`) writes a merged export to `~/Downloads`. If the
+user captured with it rather than pasting, move it into place first — the panel prints
+this command with the real filename:
+
+```bash
+mv ~/Downloads/applied_inbox_<timestamp>.json data/applied_inbox.json
+```
+
+Use the filename the panel showed, not a glob: Chrome appends ` (1)` to repeat downloads,
+so a glob can pick up a stale file. Everything below is unchanged either way.
+
 ---
 
 ## Step 2 — Preview
@@ -55,7 +67,9 @@ Keep that row count — Step 5 checks against it.
 python scripts/parse_applied_jobs.py --write --clear
 ```
 
-`--write` upserts new rows into `data/jobs.db`. `--clear` copies the inbox to `data/applied_inbox_archive/applied_inbox_<timestamp>.json`, then resets the inbox to `[]` for the next export. Rows already in the tracker are skipped, so re-running the same export is safe.
+`--write` inserts new rows into `data/jobs.db` and **merges** into rows already there. `--clear` copies the inbox to `data/applied_inbox_archive/applied_inbox_<timestamp>.json`, then resets the inbox to `[]` for the next export.
+
+A merge only ever fills blanks, refreshes `location`, and moves a status *forward*. It never touches `contacts`, `notes`, `outreach_date` or `followup_log`, and never downgrades a status, so re-running the same export is safe. Rows matching an **archived** job are reported and skipped — nothing is resurrected. Every run writes `data/applied_inbox_archive/merge_<timestamp>.log` recording exactly which columns changed.
 
 ---
 
@@ -65,7 +79,7 @@ python scripts/parse_applied_jobs.py --write --clear
 sqlite3 data/jobs.db "select count(*) from jobs;"
 ```
 
-**The row count must rise by exactly the number of rows the parser reported writing.** A smaller rise means rows overwrote each other on the primary key `(company, date_added, position_title, link)` and data was silently lost. If the numbers disagree, find the collisions before reporting success:
+**The row count must rise by exactly the number of rows the parser reported as new.** Updated rows must not move it at all — a merge edits a row in place, so a rise larger than the new count means a merge inserted instead of updating, which is the duplicate-row bug this path was built to end. A rise *smaller* than the new count means rows overwrote each other on the primary key `(company, date_added, position_title, link)` and data was silently lost. Either way, find the collisions before reporting success:
 
 ```bash
 python - <<'EOF'
@@ -85,7 +99,7 @@ EOF
 
 Identical keys mean the same posting URL twice — a true duplicate in the source, which collapses correctly. Anything else is a bug in the parser's field mapping — report it rather than papering over it.
 
-To confirm coverage, every parsed row should now exist in the DB, except rows the preview marked DUP:
+To confirm coverage, every row the preview marked `NEW ` should now exist in the DB. Rows marked `UPDT`/`SAME` keep their **original** `date_added`, so they will not match the incoming record's key — that is the merge working, not a miss:
 
 ```bash
 python - <<'EOF'
@@ -97,7 +111,8 @@ archive = max(glob.glob("data/applied_inbox_archive/*.json"))
 rows = m.parse_export(json.load(open(archive)))["rows"]
 have = set(sqlite3.connect("data/jobs.db").execute(
     "select company, date_added, position_title, link from jobs"))
-for r in rows:
+groups = m.classify_rows(rows)
+for r in groups["new"]:
     if (r["company"], r["date_added"], r["position_title"], r["link"]) not in have:
         print("MISSING:", r["company"], "|", r["position_title"])
 EOF
@@ -109,7 +124,9 @@ EOF
 
 State:
 - rows imported, and the tracker's before → after count
-- jobs skipped as already tracked, and which
+- rows **updated**, and which columns changed on each (the merge log has this)
+- rows matching an archived job, which were skipped
+- any ambiguous matches the parser refused to guess at
 - records skipped for a blank company, with title and URL
 - true duplicate postings that collapsed
 - where the backup and the archived export live
@@ -143,6 +160,6 @@ Records are dropped when `_api_c2_is_invalid` is set, when `company_name` is bla
 | `--write` | upsert new rows into `data/jobs.db` |
 | `--clear` | with `--write`: archive the inbox, then empty it |
 | `--all` | include records whose application was never submitted (they land as `Tracking`) |
-| `--include-dupes` | with `--write`: also overwrite rows already in the tracker |
+| `--skip-existing` | do not merge into rows already in the tracker; report and ignore them |
 | `--json PATH` | dump the parsed tracker rows for inspection |
 | `PATH` | parse a file other than the inbox — use the archive path to re-run a past export |
