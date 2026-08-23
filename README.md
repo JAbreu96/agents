@@ -177,6 +177,14 @@ The `outreach-email` skill uses hardcoded sender info. Update these fields in `.
 
 ---
 
+## Browser extension — ApplyPass Capture
+
+`browser_extension/applypass_capture/` is a Chrome DevTools panel that captures ApplyPass
+export responses and merges the paginated pages into one JSON file for the
+`applypass-inbound` skill, replacing the per-page copy-paste into `data/applied_inbox.json`.
+It makes no Python changes and never writes to the database. Load-unpacked instructions and
+its `node --test` command are in that directory's README.
+
 ## Running tests
 
 ```bash
