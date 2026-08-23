@@ -1,0 +1,135 @@
+/* Track the DevTools theme. DevTools does not expose its theme to panels, so
+   prefers-color-scheme is the only signal available. */
+:root {
+  --bg: #ffffff;
+  --fg: #202124;
+  --muted: #5f6368;
+  --border: #d0d0d0;
+  --row-hover: #f1f3f4;
+  --row-active: #e8f0fe;
+  --warn: #b06000;
+  --error-fg: #9aa0a6;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #202124;
+    --fg: #e8eaed;
+    --muted: #9aa0a6;
+    --border: #3c4043;
+    --row-hover: #292a2d;
+    --row-active: #303f5c;
+    --warn: #fdd663;
+    --error-fg: #80868b;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px/1.5 system-ui, sans-serif;
+}
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.spacer { flex: 1; }
+.warn { color: var(--warn); }
+
+button {
+  font: inherit;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--row-hover); }
+button:disabled { opacity: 0.45; cursor: default; }
+
+#saved {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+#main {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+#list {
+  flex: 0 0 46%;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+}
+
+#empty {
+  padding: 16px;
+  color: var(--muted);
+  max-width: 46ch;
+}
+#empty p { margin: 0 0 10px; }
+
+.row {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.row:hover { background: var(--row-hover); }
+.row.selected { background: var(--row-active); }
+.row .url {
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row .meta { color: var(--muted); font-size: 11px; }
+
+.row.error {
+  cursor: default;
+  color: var(--error-fg);
+}
+.row.error:hover { background: transparent; }
+
+#detail {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+#filter {
+  font: inherit;
+  margin: 6px 10px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+#body {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 0 10px 10px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre;
+}

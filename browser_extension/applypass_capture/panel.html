@@ -1,0 +1,23 @@
+<meta charset="utf-8">
+<link rel="stylesheet" href="panel.css">
+
+<div id="toolbar">
+  <strong id="count">0 records captured</strong>
+  <span id="unreadable" class="warn" hidden></span>
+  <span class="spacer"></span>
+  <button id="download">Download JSON</button>
+  <button id="copy">Copy JSON</button>
+  <button id="clear">Clear</button>
+</div>
+
+<div id="saved" hidden></div>
+
+<div id="main">
+  <div id="list"></div>
+  <div id="detail">
+    <input id="filter" type="search" placeholder="Filter lines…" disabled>
+    <pre id="body"></pre>
+  </div>
+</div>
+
+<script type="module" src="panel.js"></script>
