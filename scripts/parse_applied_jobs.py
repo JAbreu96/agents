@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.jobs_db import (  # noqa: E402
-    COLUMNS, get_all_jobs, status_rank, update_job_fields, upsert_job
+    COLUMNS, _use_libsql, get_all_jobs, status_rank, update_job_fields, upsert_job
 )
 
 P = "_api_c2_"
@@ -472,8 +472,12 @@ def main() -> int:
                              link=match.get("link")):
             updated += 1
 
+    # Name the database actually written to: with TURSO_DATABASE_URL set this
+    # is the cloud DB, and reporting the local path there is how you end up
+    # verifying a row delta against a file nothing touched.
+    target = "Turso" if _use_libsql() else "data/jobs.db"
     print(f"Wrote {len(groups['new'])} new row(s) and updated {updated} existing row(s) "
-          f"in data/jobs.db ({len(groups['unchanged'])} unchanged, "
+          f"in {target} ({len(groups['unchanged'])} unchanged, "
           f"{len(groups['archived'])} archived match(es) skipped, "
           f"{len(groups['ambiguous'])} ambiguous)")
     log = write_merge_log(groups, args.json_file)
