@@ -6,6 +6,13 @@
 # which macOS TCC blocks launchd from reading).
 : "${HOME:=$(cd ~ && pwd)}"
 export HOME
+# The Claude CLI resolves its stored credentials through USER. Strip it and the
+# CLI reports "Not logged in - please run /login", which sends you hunting for
+# an auth problem that does not exist. launchd does supply USER, so this is a
+# guard rather than a fix -- but the failure it prevents is a badly misleading
+# one, and the cost is two lines.
+: "${USER:=$(id -un)}"
+export USER
 export PATH="$HOME/.nvm/versions/node/v18.20.4/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

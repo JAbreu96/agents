@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "job_tracker": {
-      "command": "${HOME}/.pyenv/shims/python3",
+      "command": "python3",
       "args": [
-        "${HOME}/projects/agents/mcp_servers/job_tracker/server.py"
+        "mcp_servers/job_tracker/server.py"
       ]
     },
     "gmail_personal": {
@@ -23,7 +23,10 @@
       "args": ["-y", "@alvincrave/gtasks-mcp@0.2.0"],
       "env": {
         "GTASKS_CREDENTIALS_PATH": "${HOME}/.config/gtasks-mcp/gcp-oauth.keys.json",
-        "GTASKS_TOKEN_PATH": "${HOME}/.config/gtasks-mcp/token.json"
+        "GTASKS_TOKEN_PATH": "${HOME}/.config/gtasks-mcp/token.json",
+        "GOOGLE_CLIENT_ID": "${GTASKS_CLIENT_ID:-}",
+        "GOOGLE_CLIENT_SECRET": "${GTASKS_CLIENT_SECRET:-}",
+        "GOOGLE_REFRESH_TOKEN": "${GTASKS_REFRESH_TOKEN:-}"
       }
     },
     "gtasks_alt": {
