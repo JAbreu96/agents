@@ -179,16 +179,28 @@ def _reset_schema_cache() -> None:
     _SCHEMA_ENSURED.clear()
 
 
-def _ensure_schema(conn: sqlite3.Connection, path: Optional[str] = None) -> None:
+def _ensure_schema(conn, path: Optional[str] = None) -> None:
+    # Turso rejects busy_timeout and journal_mode outright -- "SQL not allowed
+    # statement" over Hrana -- and both are meaningless against a server, which
+    # manages its own concurrency and storage. table_info and foreign_keys ARE
+    # allowed, so the migrations below work unchanged.
+    #
+    # Keyed off the connection, not the environment: the GUI opens its own
+    # SQLite connection and must still get its PRAGMAs even when
+    # TURSO_DATABASE_URL is set.
+    remote = isinstance(conn, _ShimConnection)
+
     # busy_timeout is per-connection, so it is set every time regardless. It is
     # one statement; the other twenty are what this guard exists to skip.
-    conn.execute("PRAGMA busy_timeout=5000")
+    if not remote:
+        conn.execute("PRAGMA busy_timeout=5000")
     if path is not None and path in _SCHEMA_ENSURED:
         return
 
     # journal_mode is a property of the database file, not the connection, so it
     # only needs setting when we actually touch the schema.
-    conn.execute("PRAGMA journal_mode=WAL")
+    if not remote:
+        conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(_JOBS_DDL.format(table="jobs"))
     try:
         conn.execute("ALTER TABLE jobs ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
