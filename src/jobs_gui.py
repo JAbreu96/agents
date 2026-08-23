@@ -58,7 +58,7 @@ def get_db():
         path = os.path.abspath(DB_PATH)
         g.db = sqlite3.connect(path)
         g.db.row_factory = sqlite3.Row
-        _ensure_schema(g.db)
+        _ensure_schema(g.db, path)
     return g.db
 
 
