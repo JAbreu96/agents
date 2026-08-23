@@ -145,7 +145,9 @@ def mark_outreached(company: str, outreach_date: str = "") -> dict:
     }
 
 
-VALID_STATUSES = {"Tracking", "Applied", "Phone Screen", "Technical", "System Design", "Behavioral", "Offer", "Accepted", "Rejected"}
+# Derived from the single ordered definition in jobs_db, so the set here can
+# never drift from the ranking the importer uses to refuse a downgrade.
+VALID_STATUSES = set(jobs_db.STATUS_ORDER) - {""}
 
 
 @mcp.tool()

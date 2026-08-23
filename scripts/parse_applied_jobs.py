@@ -22,7 +22,9 @@ from bs4 import BeautifulSoup
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.jobs_db import COLUMNS, find_job_by_link, get_all_jobs, upsert_job  # noqa: E402
+from src.jobs_db import (  # noqa: E402
+    COLUMNS, get_all_jobs, status_rank, update_job_fields, upsert_job
+)
 
 P = "_api_c2_"
 SUMMARY_MAX_CHARS = 2500
@@ -179,42 +181,163 @@ def parse_export(records: list[dict], include_unsubmitted: bool = False) -> dict
     return {"rows": [rows[k] for k in order], "skipped": skipped, "dupes_in_file": dupes}
 
 
-def split_new_and_existing(rows: list[dict]) -> tuple[list[dict], list[tuple[dict, dict]]]:
+# Which columns an export may touch on a row that already exists, and which it
+# may never touch. The export is a machine's view of a posting; contacts,
+# outreach dates and followup logs are work done by hand or by another skill,
+# and an import that flattens them is worse than an import that does nothing.
+EXPORT_WINS = ("location",)
+FILL_IF_BLANK = ("job_summary", "date_applied", "link")
+CURATED = ("contacts", "notes", "outreach_date", "followup_log")
+
+
+def merge_updates(incoming: dict, existing: dict) -> dict:
     """
-    Partition parsed rows against the tracker DB. A link identifies a posting, so
-    a row that has one is matched on link alone — a company posting several
-    requisitions under one title yields distinct URLs, and falling back to
-    company+title there would discard them as false duplicates. Only linkless
-    rows fall back to company+title.
+    The columns an export record may change on the tracker row it matched.
+
+    `job_summary` is fill-if-blank rather than export-wins because the GUI runs
+    refine_summary over it (jobs_gui.py:138) and it is user-editable -- raw
+    export HTML must not overwrite a refined summary. `date_applied` likewise:
+    a date read off a real confirmation email outranks the export's.
     """
-    by_pair = {
-        (j["company"].strip().lower(), (j.get("position_title") or "").strip().lower()): j
-        for j in get_all_jobs(include_archived=True)
-    }
-    new, existing = [], []
-    for row in rows:
-        if row["link"]:
-            match = find_job_by_link(row["link"])
+    updates: dict[str, str] = {}
+
+    for col in EXPORT_WINS:
+        value = (incoming.get(col) or "").strip()
+        if value and value != (existing.get(col) or "").strip():
+            updates[col] = value
+
+    for col in FILL_IF_BLANK:
+        value = (incoming.get(col) or "").strip()
+        if value and not (existing.get(col) or "").strip():
+            updates[col] = value
+
+    # Never downgrade a status: the rule the skills have stated in prose since
+    # inbox-triage was written. The export only ever emits Applied or Tracking,
+    # so this can only ever move a row forward.
+    incoming_status = (incoming.get("status") or "").strip()
+    if status_rank(incoming_status) > status_rank(existing.get("status")):
+        updates["status"] = incoming_status
+
+    return updates
+
+
+def _pick(candidates: list[dict]) -> dict | None:
+    """Most recently added live row, the preference find_job_by_link encodes."""
+    live = [c for c in candidates if not c.get("archived")]
+    if not live:
+        return None
+    return sorted(live, key=lambda r: r.get("date_added") or "")[-1]
+
+
+def classify_rows(rows: list[dict]) -> dict:
+    """
+    Partition parsed rows against the tracker DB.
+
+    A link identifies a posting, so a row that has one is matched on link first
+    -- a company posting several requisitions under one title yields distinct
+    URLs, and matching those on company+title would collapse them as false
+    duplicates. On a link miss we fall back to company+title but accept only
+    rows whose link is blank: those are unreachable by link forever otherwise,
+    so without this every export would insert a duplicate beside them. A row
+    holding a *different* non-blank link is a different requisition, not a match.
+
+    Archived rows are matched but frozen. Previously find_job_by_link filtered
+    them out while the company+title path did not, so a record matching an
+    archived row was reported new and inserted next to the job you had
+    deliberately archived.
+    """
+    tracker = get_all_jobs(include_archived=True)
+
+    by_link: dict[str, list[dict]] = {}
+    by_pair: dict[tuple, list[dict]] = {}
+    blank_by_pair: dict[tuple, list[dict]] = {}
+    for job in tracker:
+        pair = ((job.get("company") or "").strip().lower(),
+                (job.get("position_title") or "").strip().lower())
+        by_pair.setdefault(pair, []).append(job)
+        link = _norm_link(job.get("link") or "")
+        if link:
+            by_link.setdefault(link, []).append(job)
         else:
-            match = by_pair.get((row["company"].lower(), row["position_title"].lower()))
-        (existing.append((row, match)) if match else new.append(row))
-    return new, existing
+            blank_by_pair.setdefault(pair, []).append(job)
 
-
-def _print_report(result: dict, new: list[dict], existing: list[tuple[dict, dict]]) -> None:
-    rows = result["rows"]
-    print(f"Parsed {len(rows)} record(s) → {len(new)} new, {len(existing)} already in tracker\n")
+    out = {"new": [], "updates": [], "unchanged": [], "archived": [], "ambiguous": []}
 
     for row in rows:
-        dup = next((m for r, m in existing if r is row), None)
-        flag = "DUP " if dup else "NEW "
-        print(f"{flag}{row['company']} — {row['position_title']}")
+        pair = (row["company"].strip().lower(), row["position_title"].strip().lower())
+        link = _norm_link(row["link"])
+
+        if link:
+            candidates = by_link.get(link, [])
+            if not candidates:
+                # Blank-link rows only; see the docstring.
+                fallback = blank_by_pair.get(pair, [])
+                live = [c for c in fallback if not c.get("archived")]
+                if len(live) > 1:
+                    out["ambiguous"].append((row, live))
+                    continue
+                candidates = fallback
+        else:
+            candidates = by_pair.get(pair, [])
+
+        if not candidates:
+            out["new"].append(row)
+            continue
+
+        match = _pick(candidates)
+        if match is None:
+            # Every candidate is archived: report it, touch nothing.
+            out["archived"].append((row, candidates[0]))
+            continue
+
+        updates = merge_updates(row, match)
+        (out["updates"] if updates else out["unchanged"]).append((row, match, updates))
+
+    return out
+
+
+def _print_report(result: dict, groups: dict) -> None:
+    rows = result["rows"]
+    print(f"Parsed {len(rows)} record(s) → {len(groups['new'])} new, "
+          f"{len(groups['updates'])} to update, {len(groups['unchanged'])} unchanged, "
+          f"{len(groups['archived'])} archived, {len(groups['ambiguous'])} ambiguous\n")
+
+    matched = {id(r): (m, u) for r, m, u in groups["updates"] + groups["unchanged"]}
+    archived = {id(r): m for r, m in groups["archived"]}
+    ambiguous = {id(r): c for r, c in groups["ambiguous"]}
+
+    for row in rows:
+        if id(row) in archived:
+            flag = "ARCH"
+        elif id(row) in ambiguous:
+            flag = "AMBG"
+        elif id(row) in matched:
+            flag = "UPDT" if matched[id(row)][1] else "SAME"
+        else:
+            flag = "NEW "
+        print(f"{flag} {row['company']} — {row['position_title']}")
         print(f"    applied {row['date_applied'] or '—'} | {row['location'] or 'location n/a'} "
               f"| {row['status']}")
         print(f"    {row['link'] or '(no link)'}")
-        if dup:
-            print(f"    ↳ matches existing row: {dup['company']} / {dup.get('date_added')} "
-                  f"(status: {dup.get('status') or '—'})")
+
+        if id(row) in archived:
+            m = archived[id(row)]
+            print(f"    ↳ matches ARCHIVED row: {m['company']} / {m.get('date_added')} "
+                  f"— skipped, neither inserted nor updated")
+        elif id(row) in ambiguous:
+            print(f"    ↳ {len(ambiguous[id(row)])} linkless rows share this company and "
+                  f"title — refusing to guess; fill the link by hand")
+        elif id(row) in matched:
+            m, updates = matched[id(row)]
+            print(f"    ↳ matches existing row: {m['company']} / {m.get('date_added')} "
+                  f"(status: {m.get('status') or '—'})")
+            if updates:
+                kept = ""
+                if "status" not in updates and m.get("status"):
+                    kept = f" (status {m['status']} kept)"
+                print(f"    ↳ would set: {', '.join(sorted(updates))}{kept}")
+            else:
+                print("    ↳ nothing to change")
         print()
 
     if result["dupes_in_file"]:
@@ -227,6 +350,42 @@ def _print_report(result: dict, new: list[dict], existing: list[tuple[dict, dict
         for company, reason in result["skipped"]:
             print(f"  - {company}: {reason}")
         print()
+
+
+def write_merge_log(groups: dict, source: str) -> str:
+    """
+    Record what a --write run changed, beside the export archive it came from.
+    A merge is otherwise invisible afterwards: the preview scrolls away and the
+    tracker has no updated-at column. Provenance does not go in `notes` -- that
+    is a curated field this importer promises never to write.
+    """
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    dest = os.path.join(ARCHIVE_DIR, f"merge_{stamp}.log")
+    with open(dest, "w", encoding="utf-8") as f:
+        f.write(f"source: {source}\n")
+        f.write(f"written: {datetime.now().isoformat(timespec='seconds')}\n\n")
+        f.write(f"inserted {len(groups['new'])} new row(s)\n")
+        for row in groups["new"]:
+            f.write(f"  NEW  {row['company']} — {row['position_title']}\n")
+        f.write(f"\nupdated {len(groups['updates'])} existing row(s)\n")
+        for row, match, updates in groups["updates"]:
+            f.write(f"  UPDT {match['company']} / {match.get('date_added')} — "
+                    f"{match.get('position_title')}\n")
+            for col in sorted(updates):
+                before = (match.get(col) or "")[:60]
+                after = (updates[col] or "")[:60]
+                f.write(f"         {col}: {before!r} -> {after!r}\n")
+        if groups["archived"]:
+            f.write(f"\nskipped {len(groups['archived'])} archived match(es)\n")
+            for row, match in groups["archived"]:
+                f.write(f"  ARCH {match['company']} — {match.get('position_title')}\n")
+        if groups["ambiguous"]:
+            f.write(f"\nrefused {len(groups['ambiguous'])} ambiguous match(es)\n")
+            for row, candidates in groups["ambiguous"]:
+                f.write(f"  AMBG {row['company']} — {row['position_title']} "
+                        f"({len(candidates)} candidates)\n")
+    return dest
 
 
 def archive_and_clear(path: str) -> str:
@@ -249,8 +408,8 @@ def main() -> int:
                     help="Upsert parsed rows into data/jobs.db (default is a dry-run preview)")
     ap.add_argument("--all", action="store_true", dest="include_unsubmitted",
                     help="Include records where the application was not submitted")
-    ap.add_argument("--include-dupes", action="store_true",
-                    help="With --write, also write rows that already exist in the tracker")
+    ap.add_argument("--skip-existing", action="store_true",
+                    help="do not merge into rows already in the tracker; report and ignore them")
     ap.add_argument("--json", dest="json_out", metavar="PATH",
                     help="Write the parsed tracker rows to PATH as JSON")
     ap.add_argument("--clear", action="store_true",
@@ -281,8 +440,12 @@ def main() -> int:
         return 0
 
     result = parse_export(data, include_unsubmitted=args.include_unsubmitted)
-    new, existing = split_new_and_existing(result["rows"])
-    _print_report(result, new, existing)
+    groups = classify_rows(result["rows"])
+    if args.skip_existing:
+        # Opt out of merging: matched rows revert to being reported and ignored.
+        groups["unchanged"] += groups["updates"]
+        groups["updates"] = []
+    _print_report(result, groups)
 
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as f:
@@ -295,11 +458,26 @@ def main() -> int:
             print("(--clear only takes effect alongside --write; the input file is untouched.)")
         return 0
 
-    to_write = result["rows"] if args.include_dupes else new
-    for row in to_write:
+    for row in groups["new"]:
         upsert_job(row)
-    print(f"Wrote {len(to_write)} row(s) to data/jobs.db"
-          f"{'' if args.include_dupes else f' ({len(existing)} duplicate(s) skipped)'}")
+
+    # Address each update to the key of the row we FOUND, never the key implied
+    # by the incoming record: date_added comes from ApplyPass's datetime_matched,
+    # which drifts when a job is re-matched, and keying off it made INSERT OR
+    # REPLACE miss the row and insert a duplicate carrying the same link.
+    updated = 0
+    for _row, match, updates in groups["updates"]:
+        if update_job_fields(match["company"], match.get("date_added") or "", updates,
+                             position_title=match.get("position_title"),
+                             link=match.get("link")):
+            updated += 1
+
+    print(f"Wrote {len(groups['new'])} new row(s) and updated {updated} existing row(s) "
+          f"in data/jobs.db ({len(groups['unchanged'])} unchanged, "
+          f"{len(groups['archived'])} archived match(es) skipped, "
+          f"{len(groups['ambiguous'])} ambiguous)")
+    log = write_merge_log(groups, args.json_file)
+    print(f"Merge log: {os.path.relpath(log)}")
 
     if args.clear:
         dest = archive_and_clear(args.json_file)

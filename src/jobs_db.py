@@ -43,6 +43,25 @@ _JOBS_DDL = """
 # The columns that identify a row, in key order.
 KEY_COLUMNS = ["company", "date_added", "position_title", "link"]
 
+# The funnel, in order. Rank is what enforces "never downgrade a status" -- a
+# rule the skills have stated in prose for a long time (inbox-triage/SKILL.md:15,
+# application-digest/SKILL.md:64) without anything in code holding it. It lives
+# here rather than in jobs_gui because importing that module to read a list would
+# construct a Flask app as a side effect.
+STATUS_ORDER = [
+    "", "Tracking", "Applied", "Phone Screen", "Technical",
+    "System Design", "Behavioral", "Offer", "Accepted", "Rejected",
+]
+
+
+def status_rank(status: Optional[str]) -> int:
+    """Position in STATUS_ORDER; -1 for anything unrecognized, so an unknown
+    status never counts as forward progress."""
+    try:
+        return STATUS_ORDER.index((status or "").strip())
+    except ValueError:
+        return -1
+
 
 _META_DDL = """
         CREATE TABLE IF NOT EXISTS meta (
@@ -452,6 +471,41 @@ def update_field(company: str, date_added: str, field: str, value: str,
         cur = conn.execute(
             f"UPDATE jobs SET {field} = ? WHERE {where}",
             [value, company, date_added] + extra
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def update_job_fields(company: str, date_added: str, updates: dict,
+                      position_title: Optional[str] = None,
+                      link: Optional[str] = None) -> bool:
+    """
+    Update several columns on one row in a single statement. The multi-column
+    sibling of update_field, for callers merging a batch of changes into a row
+    they have already identified -- doing that through update_field would open
+    and close a connection per column.
+
+    The caller must pass the key of the row it found, not the key implied by
+    whatever data it is merging in. An importer that keys off its own payload
+    instead will miss the row and insert a duplicate beside it.
+    """
+    updatable = set(COLUMNS) - {"company", "date_added"}
+    bad = set(updates) - updatable
+    if bad:
+        raise ValueError(f"Fields {sorted(bad)} are not updatable.")
+    if not updates:
+        return False
+    conn = _connect()
+    if not conn:
+        return False
+    try:
+        where, extra = _key_clause(position_title, link)
+        sets = ", ".join(f"{c} = ?" for c in updates)
+        cur = conn.execute(
+            f"UPDATE jobs SET {sets} WHERE {where}",
+            list(updates.values()) + [company, date_added] + extra
         )
         conn.commit()
         return cur.rowcount > 0

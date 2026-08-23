@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.job_agent import JobTrackerAgent  # noqa: E402
 from src.jobs_db import (  # noqa: E402
     INTERVIEW_TYPES,
+    STATUS_ORDER,
     _ensure_schema,
     GHOSTED_AFTER_DAYS,
     RATE_MIN_DENOMINATOR,
@@ -45,10 +46,9 @@ EDITABLE_COLUMNS = {
     "company", "status", "notes", "contacts", "job_summary",
     "outreach_date", "date_applied", "followup_log",
 }
-STATUS_VALUES = [
-    "", "Tracking", "Applied", "Phone Screen", "Technical",
-    "System Design", "Behavioral", "Offer", "Accepted", "Rejected",
-]
+# The order lives in jobs_db with the rest of the schema vocabulary; the name
+# stays bound here because the templates use it.
+STATUS_VALUES = STATUS_ORDER
 
 app = Flask(__name__)
 
