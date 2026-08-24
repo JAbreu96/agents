@@ -1,6 +1,6 @@
 ---
 name: inbox-triage
-description: Reconcile new Gmail against the job tracker and turn only the things that need a human into Google Tasks. Reads mail since a stored watermark across both inboxes, updates tracked rows, and records interviews and follow-ups. Runs daily on a schedule, or on demand.
+description: Reconcile new Gmail against the job tracker and turn only the things that need a human into Google Tasks. Reads mail since a stored watermark across both inboxes and updates rows that already exist; the only rows it creates are recruiter outreach. Records interviews and follow-ups. Runs daily on a schedule, or on demand.
 argument-hint: "(no arguments required)"
 ---
 
@@ -14,6 +14,7 @@ This is the single scheduled owner of Gmail→tracker reconciliation. It does no
 - **Never guess a row.** A wrong silent write is worse than an unanswered question. When an email cannot be tied to exactly one tracked role, ask via a task.
 - **Never downgrade a status.** `Phone Screen` outranks `Applied`. Only move a job forward, except for `Rejected`, which may always be set.
 - **The gate in Step 5 is the only thing that creates tasks.** No earlier step may create one. Categories and scores decide what is *worth* surfacing; the gate decides whether the ball is actually in Joel's court, and both must agree.
+- **`record_recruiter_outreach` is the only thing that creates job rows.** Triage reconciles mail against rows that already exist; it does not open new ones from receipts, rejections, or interview requests. A role Joel was pitched has no other way in — everything else arrives through `/applypass-inbound` with a real URL and description. Before adding any write path, check it against this line.
 - **Never destroy work.** Triage adds tasks and annotates them. It does not complete or delete them — a wrong annotation is visible and reversible, a wrong completion silently erases a real obligation.
 - **Idempotent.** Running twice in a row must produce zero new tasks and zero new writes.
 
@@ -114,8 +115,8 @@ Assign each thread exactly one category, judged on its **newest message**.
 |---|---|---|
 | `human_action` | A real person wrote and wants something from Joel | Gate |
 | `deadline` | Something has a clock: assessment expiry, incomplete application, scheduled interview | Gate |
-| `rejection` | `detect_rejection` finds language in the message's own text | Tracker write, silent |
-| `auto_ack` | "Thank you for applying", "we've received your application", Indeed/Workday/Greenhouse receipts | Tracker write if untracked, else nothing |
+| `rejection` | `detect_rejection` finds language in the message's own text | Update a tracked row, silent. Never creates one |
+| `auto_ack` | "Thank you for applying", "we've received your application", Indeed/Workday/Greenhouse receipts | Update a tracked row. **Never create one** — untracked receipts are reported in Step 8, not written |
 | `recruiter_outreach` | A staffing/agency recruiter pitching a role Joel never applied to | Tracker row; gate only if scored 60+ |
 | `noise` | Job alerts, marketing, newsletters, Glassdoor/Dice/LinkedIn digests, security codes | Ignore entirely |
 
@@ -175,10 +176,29 @@ For every `rejection` and every status-advancing `human_action`/`deadline`:
 | `exact` | `mcp__job_tracker__update_job_status` with the returned `position_title`. Silent. |
 | `ambiguous` | **No write.** Carry to the gate as `unsure`: "Which <company> role does this refer to?", listing candidates. |
 | `none` + it is a rejection | **No write.** No task — a rejection for an untracked role needs nothing. |
-| `none` + it is human/deadline | `mcp__job_tracker__add_job` to create the row, then proceed. Auto-apply submits roles that never reach the tracker; an interview request for an unknown company is exactly the case worth capturing. |
+| `none` + it is an `auto_ack` | **No write, no task.** Count it for Step 8 and move on. |
+| `none` + it is human/deadline | **No write.** Carry to the gate so it becomes a task. The thing worth capturing is Joel's attention, not a row. |
 
-Status mapping: interview scheduled/requested → `Phone Screen`; rejection → `Rejected`;
-receipt for an untracked role → `Applied`.
+Status mapping: interview scheduled/requested → `Phone Screen`; rejection → `Rejected`.
+Both apply only to a row that already exists.
+
+### Triage does not create job rows from receipts
+
+It used to. `auto_ack` for an untracked role created a row at `Applied`, and an
+untracked human/deadline message called `mcp__job_tracker__add_job`. Between them they
+produced **53 rows with nothing in them** — no posting URL, no description, no location,
+and for 38 of them the title `Role not specified`. A receipt names a company and
+sometimes a role; it never carries the posting, so `link` was filled with a synthetic
+`email:<gmail-message-id>` just to satisfy the primary key.
+
+Those rows were never needed. Auto-apply submissions reach the tracker through
+`/applypass-inbound` with the real URL, the real title and a ~2500-character
+description. The receipt arrives *because* the application was submitted — it is a
+duplicate of a row the import is already going to write, minus everything useful.
+
+So: acknowledge receipts against rows that exist, and let the import own creation.
+An untracked interview request still reaches Joel — as a task, which is what he acts
+on anyway.
 
 ### A rejection closes the row it names, not the thread
 
@@ -368,6 +388,14 @@ Drafts are never sent. Triage does not send email; it leaves work ready for Joel
   `jobs_db.add_interview` with `occurred_date`. Only rounds that actually happened — never a
   scheduled-but-not-yet-held invite, and never a cancelled one. This table feeds the funnel
   stats and cannot be rebuilt from anywhere else.
+
+  **Only against a row that already exists.** `add_interview` keys off the full composite
+  `(company, date_added, position_title, link)` and does not check that a job matches, so a
+  round recorded for an untracked company attaches to nothing: it still counts in
+  `interview_stats` and the funnel while being unreachable from the table — a number Joel
+  cannot click through to. Since triage no longer creates rows, this is now reachable. If
+  the job is untracked, skip the round and let the gate task carry it; record it once the
+  row exists.
 - **A row was acted on**: `jobs_db.update_followup_log` with today's date, so "have I dealt
   with this" stops being invisible.
 - **Joel answered a recruiter**: `mcp__job_tracker__record_recruiter_reply` with their
@@ -404,6 +432,16 @@ inbox-triage <date>
   gate: <n> passed, <n> stopped (no ask: <n>, sign-off: <n>, score < 60: <n>)
   recruiters: <n> seen (<n> new), <n> roles captured, <n> replies recorded
   tracker: <n> updated, <n> created, <n> ambiguous (asked)
+  untracked receipts: <n> not written — <company> (<role or "role not named">), …
   tasks: <n> created, <n> skipped as duplicates, <n> superseded
   interviews recorded: <n>
 ```
+
+`tracker: <n> created` counts recruiter roles only, and must be 0 whenever
+`roles captured` is 0 — nothing else writes a row.
+
+The `untracked receipts` line is the whole record that those emails arrived. Name the
+company and the role where the mail states one, so a genuinely missing job is visible
+and can be added by hand. Expect most of them to appear in the next
+`/applypass-inbound` run with a real posting URL; if one never does, that is worth
+looking at rather than silently filing.
