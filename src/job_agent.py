@@ -41,7 +41,14 @@ class JobTrackerAgent:
         return resp.text
 
     @staticmethod
-    def parse_job_page(html: str, url: str) -> JobRecord:
+    def parse_job_page(html: str, url: str, refine: bool = True) -> JobRecord:
+        """
+        `refine=False` returns the scraped text as-is, skipping the two claude
+        CLI subprocesses below (summary polish and company research). Callers
+        adding one job interactively want them; a bulk backfill does not -- 118
+        rows would be 236 CLI invocations, and the summaries would not match the
+        raw HTML-stripped text every imported row already carries.
+        """
         soup = BeautifulSoup(html, "html.parser")
 
         title = (soup.find("h1") or soup.find("title") or soup.find("h2") or soup.find("div", class_="job-title"))
@@ -154,12 +161,12 @@ class JobTrackerAgent:
             summary = summary[:20000] + "..."
 
         # Refine summary with Claude
-        if summary:
+        if summary and refine:
             summary = JobTrackerAgent.refine_summary(summary)
 
         # Research company for notes
         notes = ""
-        if company_text and company_text != "(unknown company)":
+        if refine and company_text and company_text != "(unknown company)":
             print(f"Researching company: {company_text}...")
             notes = JobTrackerAgent.research_company(company_text)
 
