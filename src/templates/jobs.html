@@ -848,10 +848,31 @@ function makeInterviewsField(job, rounds) {
     labelInput.style.display = typeSel.value === 'other' ? '' : 'none';
   });
 
+  // Which of the two dates this round carries. A round is booked or it is held,
+  // never both -- the API rejects both set -- so this picks the field rather
+  // than offering two date boxes that can contradict each other.
+  const whenSel = document.createElement('select');
+  whenSel.title = 'Whether this round has happened yet';
+  for (const [v, t] of [['occurred', 'happened on'], ['scheduled', 'booked for']]) {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = t;
+    whenSel.appendChild(opt);
+  }
+
   const dateInput = document.createElement('input');
   dateInput.type = 'date';
   dateInput.value = new Date().toISOString().slice(0, 10);
-  dateInput.title = 'Date the round actually happened';
+  const syncWhen = () => {
+    const booked = whenSel.value === 'scheduled';
+    dateInput.title = booked ? 'Date the round is booked for'
+                             : 'Date the round actually happened';
+    // A booked round is not an outcome yet, so there is nothing to rate.
+    ratingSel.disabled = booked;
+    if (booked) ratingSel.value = '';
+    btn.textContent = booked ? 'Book Round' : 'Log Round';
+  };
+  whenSel.addEventListener('change', syncWhen);
 
   const ratingSel = document.createElement('select');
   ratingSel.title = 'How it felt (optional)';
@@ -885,7 +906,8 @@ function makeInterviewsField(job, rounds) {
     const body = Object.assign(jobKeyFields(job), {
       interview_type: typeSel.value,
       type_label: labelInput.value.trim(),
-      occurred_date: dateInput.value,
+      occurred_date: whenSel.value === 'occurred' ? dateInput.value : '',
+      scheduled_date: whenSel.value === 'scheduled' ? dateInput.value : '',
       self_rating: ratingSel.value,
       loop_id: loopInput.value.trim(),
       notes: notesInput.value.trim(),
@@ -896,12 +918,15 @@ function makeInterviewsField(job, rounds) {
       body: JSON.stringify(body),
     });
     const data = await res.json();
-    if (!res.ok) { err.textContent = data.error || 'Could not log that round.'; return; }
+    if (!res.ok) { err.textContent = data.error || 'Could not save that round.'; return; }
     loopInput.value = ''; notesInput.value = ''; ratingSel.value = ''; labelInput.value = '';
     reloadInterviews(job, list);
   });
 
-  for (const el of [typeSel, labelInput, dateInput, ratingSel, loopInput, notesInput, btn]) {
+  syncWhen();
+
+  for (const el of [typeSel, labelInput, whenSel, dateInput, ratingSel, loopInput,
+                    notesInput, btn]) {
     el.addEventListener('click', (e) => e.stopPropagation());
     form.appendChild(el);
   }
@@ -933,7 +958,8 @@ function renderInterviews(job, list, rounds) {
     row.className = 'interview-row';
     const type = r.interview_type === 'other' && r.type_label
       ? r.type_label : (r.interview_type || '').replace(/_/g, ' ');
-    const bits = [r.occurred_date, type];
+    // A booked round has no occurred_date; showing a blank there reads as a bug.
+    const bits = [r.occurred_date || ('booked ' + (r.scheduled_date || '?')), type];
     if (r.loop_id) bits.push('loop: ' + r.loop_id);
     if (r.self_rating) bits.push(r.self_rating + '/5');
     if (r.notes) bits.push(r.notes);

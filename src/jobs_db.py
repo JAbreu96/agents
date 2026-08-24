@@ -1959,6 +1959,48 @@ def upcoming_interviews(include_past: bool = False) -> list[dict]:
     return out
 
 
+# Statuses that assert a round happened or is booked. Rejected is deliberately
+# out: its process is over, so a missing round there is history to reconstruct
+# rather than a booking at risk of being forgotten, and mixing the two would
+# make the count on the Insights card un-actionable.
+INTERVIEWING_STATUSES = [
+    "Phone Screen", "Technical", "System Design", "Behavioral", "Offer", "Accepted",
+]
+
+
+def jobs_missing_interview_rows() -> list[dict]:
+    """
+    Jobs whose status claims an interview, with no round in `interviews`.
+
+    Status and the interview log are written by different paths and nothing has
+    ever reconciled them, so they drift silently -- which is how a confirmed
+    Morgan Stanley booking sat in free-text `notes` while "Coming up" showed
+    every other screen. The drift is only visible if something counts it.
+
+    A LEFT JOIN on the full composite key, so a round recorded against a
+    slightly different key still reads as missing. That is the intent: such a
+    round is unreachable from the table too.
+    """
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        marks = ", ".join("?" for _ in INTERVIEWING_STATUSES)
+        rows = conn.execute(
+            "SELECT j.company, j.date_added, j.position_title, j.link, j.status "
+            "FROM jobs j LEFT JOIN interviews i "
+            "  ON i.company = j.company AND i.date_added = j.date_added "
+            " AND i.position_title = j.position_title AND i.link = j.link "
+            f"WHERE j.status IN ({marks}) AND COALESCE(j.archived, 0) = 0 "
+            "  AND i.id IS NULL "
+            "ORDER BY j.date_added DESC",
+            tuple(INTERVIEWING_STATUSES),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def mark_interview_occurred(interview_id: int, occurred_date: str = "") -> bool:
     """
     Promotes a booked round to one that happened. Returns False if the id is

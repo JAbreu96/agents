@@ -180,7 +180,8 @@ For every `rejection` and every status-advancing `human_action`/`deadline`:
 | `none` + it is human/deadline | **No write.** Carry to the gate so it becomes a task. The thing worth capturing is Joel's attention, not a row. |
 
 Status mapping: interview scheduled/requested → `Phone Screen`; rejection → `Rejected`.
-Both apply only to a row that already exists.
+Both apply only to a row that already exists. A status is not a booking — if a date and
+time were agreed, Step 6 records the round as well, or the date is lost.
 
 ### Triage does not create job rows from receipts
 
@@ -412,10 +413,26 @@ Drafts are never sent. Triage does not send email; it leaves work ready for Joel
 
 ## Step 6 — Record what happened
 
+- **An interview was booked** (mail names an agreed date *and* time — a confirmation, a
+  calendar invite, an "you're all set for Tuesday at 2"): `jobs_db.add_interview` with
+  `scheduled_date` and no `occurred_date`. This is what puts it on the "Coming up" card.
+
+  Recording a booking **cannot** move any rate. `classify_interviews()` drops
+  booked-but-not-held rounds before `interview_stats()` sees them, and `add_interview`'s
+  own docstring is explicit that only `occurred_date` makes a round count toward an
+  outcome. An earlier version of this skill banned recording invites to protect the funnel;
+  that protection now lives in the data layer, and the ban only lost the dates. Do not
+  reinstate it.
+
+  **A time must actually be agreed.** "Can you send some availability?" or a bare
+  scheduling link is not a booking — move the status and leave the round alone. Writing a
+  guessed date puts a fiction on the card, which is worse than the gap it fills.
+
 - **An interview occurred** (a screen took place, a thank-you or outcome references it):
-  `jobs_db.add_interview` with `occurred_date`. Only rounds that actually happened — never a
-  scheduled-but-not-yet-held invite, and never a cancelled one. This table feeds the funnel
-  stats and cannot be rebuilt from anywhere else.
+  `jobs_db.add_interview` with `occurred_date`. Only rounds that actually happened, and
+  never a cancelled one. This table feeds the funnel stats and cannot be rebuilt from
+  anywhere else. If the round was already recorded as booked, use
+  `jobs_db.mark_interview_occurred(<id>)` rather than adding a second row.
 
   **Only against a row that already exists.** `add_interview` keys off the full composite
   `(company, date_added, position_title, link)` and does not check that a job matches, so a
@@ -462,7 +479,7 @@ inbox-triage <date>
   tracker: <n> updated, <n> created, <n> ambiguous (asked)
   untracked receipts: <n> not written — <company> (<role or "role not named">), …
   tasks: <n> created, <n> skipped as duplicates, <n> superseded
-  interviews recorded: <n>
+  interviews recorded: <n> held, <n> booked
 ```
 
 `tracker: <n> created` counts recruiter roles only, and must be 0 whenever

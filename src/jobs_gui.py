@@ -42,6 +42,7 @@ from src.jobs_db import (  # noqa: E402
     get_recruiters,
     job_silence_stats,
     upcoming_interviews,
+    jobs_missing_interview_rows,
     recruiter_coverage,
     interview_stats,
     upsert_job,
@@ -383,6 +384,7 @@ def insights_view():
         silence=job_silence_stats(),
         upcoming=upcoming_interviews(include_past=True),
         upcoming_window=UPCOMING_WINDOW_DAYS,
+        missing_rounds=jobs_missing_interview_rows(),
     )
 
 
@@ -444,6 +446,7 @@ def api_add_interview():
     link = (payload.get("link") or "").strip()
     interview_type = (payload.get("interview_type") or "").strip()
     occurred_date = (payload.get("occurred_date") or "").strip()
+    scheduled_date = (payload.get("scheduled_date") or "").strip()
     type_label = (payload.get("type_label") or "").strip()
     loop_id = (payload.get("loop_id") or "").strip()
     notes = (payload.get("notes") or "").strip()
@@ -463,13 +466,23 @@ def api_add_interview():
         return jsonify({"error": f"interview_type must be one of: {', '.join(INTERVIEW_TYPES)}"}), 400
     if interview_type == "other" and not type_label:
         return jsonify({"error": "type_label is required when interview_type is 'other'"}), 400
-    if not occurred_date:
-        return jsonify({"error": "occurred_date is required — log rounds that happened"}), 400
+    # The two dates are the two states a round can be in, and it is exactly one
+    # of them. jobs_db.add_interview already rejects neither; both is rejected
+    # here because it is the more confusing error -- upcoming_interviews() reads
+    # a round with an occurred_date as done, so a row carrying both claims to be
+    # simultaneously booked and held, and silently vanishes from "Coming up".
+    if not occurred_date and not scheduled_date:
+        return jsonify({"error": "one of occurred_date (it happened) or "
+                                 "scheduled_date (it is booked) is required"}), 400
+    if occurred_date and scheduled_date:
+        return jsonify({"error": "give occurred_date or scheduled_date, not both — "
+                                 "mark a booked round as held instead"}), 400
 
     try:
         new_id = add_interview(
             company=company, date_added=date_added, position_title=position_title,
             link=link, interview_type=interview_type, occurred_date=occurred_date,
+            scheduled_date=scheduled_date,
             type_label=type_label, loop_id=loop_id, self_rating=rating, notes=notes,
         )
     except ValueError as exc:
