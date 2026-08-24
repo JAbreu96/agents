@@ -1,5 +1,8 @@
 """
-Local web GUI for browsing and editing the jobs.db SQLite cache.
+Local web GUI for browsing and editing the job tracker.
+
+Reads whichever database jobs_db is configured for -- Turso when
+TURSO_DATABASE_URL is set, data/jobs.db otherwise.
 
 Run:
     python src/jobs_gui.py
@@ -9,7 +12,6 @@ Then open http://127.0.0.1:5151 in your browser.
 
 import io
 import os
-import sqlite3
 import sys
 from datetime import date
 from urllib.parse import urlparse
@@ -20,8 +22,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.job_agent import JobTrackerAgent  # noqa: E402
 from src.jobs_db import (  # noqa: E402
     INTERVIEW_TYPES,
+    LIST_COLUMNS,
     STATUS_ORDER,
-    _ensure_schema,
+    _connect,
+    _WRITE_EXC,
     GHOSTED_AFTER_DAYS,
     RATE_MIN_DENOMINATOR,
     add_interview,
@@ -40,8 +44,6 @@ from src.jobs_db import (  # noqa: E402
     upsert_job,
 )
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "jobs.db")
-
 EDITABLE_COLUMNS = {
     "company", "status", "notes", "contacts", "job_summary",
     "outreach_date", "date_applied", "followup_log",
@@ -54,11 +56,16 @@ app = Flask(__name__)
 
 
 def get_db():
+    """
+    One connection policy for the whole app: _connect() picks the driver from
+    TURSO_DATABASE_URL and builds the schema itself.
+
+    This used to open data/jobs.db directly while every jobs_db helper went to
+    Turso, so a single page read two different databases -- the local file was
+    153 jobs behind, and the table quietly showed the smaller set.
+    """
     if "db" not in g:
-        path = os.path.abspath(DB_PATH)
-        g.db = sqlite3.connect(path)
-        g.db.row_factory = sqlite3.Row
-        _ensure_schema(g.db, path)
+        g.db = _connect(create=True)
     return g.db
 
 
@@ -92,12 +99,47 @@ def api_jobs():
     """
     include_archived = request.args.get("include_archived") in ("1", "true", "yes")
     db = get_db()
-    query = "SELECT * FROM jobs"
+    # Named columns, not SELECT *: dropping job_summary here takes the payload
+    # from 2.1MB to 0.68MB and the query from 230ms to 152ms. Trimming in Python
+    # instead would still drag the column across the wire from Turso.
+    query = f"SELECT {', '.join(LIST_COLUMNS)} FROM jobs"
     if not include_archived:
         query += " WHERE archived = 0"
     query += " ORDER BY date_added DESC"
     rows = db.execute(query).fetchall()
     return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/jobs/detail")
+def api_job_detail():
+    """
+    Everything the list deliberately left out, for one row, on expand.
+
+    job_summary and interview rounds are cached differently by the client and
+    that is the point: job_summary has exactly one writer -- the edit box in the
+    panel -- so once fetched it can be held for the life of the page, and
+    ?summary=0 says the client already has it. Rounds have a second writer,
+    inbox-triage on a daily cron, so they are re-read on every expand and never
+    cached.
+    """
+    key = {
+        "company": (request.args.get("company") or "").strip(),
+        "date_added": (request.args.get("date_added") or "").strip(),
+        "position_title": (request.args.get("position_title") or "").strip(),
+        "link": (request.args.get("link") or "").strip(),
+    }
+    if not key["company"]:
+        return jsonify({"error": "company is required"}), 400
+
+    payload = {"interviews": get_interviews(**key)}
+    if request.args.get("summary") not in ("0", "false", "no"):
+        row = get_db().execute(
+            "SELECT job_summary FROM jobs WHERE company = ? AND date_added = ? "
+            "AND position_title = ? AND link = ?",
+            (key["company"], key["date_added"], key["position_title"], key["link"]),
+        ).fetchone()
+        payload["job_summary"] = (row["job_summary"] if row else "") or ""
+    return jsonify(payload)
 
 
 @app.route("/api/jobs/export.csv")
@@ -215,6 +257,24 @@ def api_update_job():
         return jsonify({"error": "company cannot be blank"}), 400
 
     db = get_db()
+
+    # Renaming a company moves the row to a new primary key, which can collide.
+    # Checked with a SELECT rather than left to the UPDATE, because the driver
+    # decides which exception a collision raises -- IntegrityError on SQLite, a
+    # bare ValueError over Hrana -- and tests/conftest.py strips TURSO_* for the
+    # whole session, so no test can ever exercise the remote path. A SELECT
+    # behaves identically on both, so the local suite covers the real behaviour.
+    if field == "company" and value != company:
+        taken = db.execute(
+            "SELECT 1 FROM jobs WHERE company = ? AND date_added = ? "
+            "AND position_title = ? AND link = ?",
+            (value, date_added, position_title or "", row_link or ""),
+        ).fetchone()
+        if taken:
+            return jsonify({
+                "error": f"A job for '{value}' on {date_added} already exists."
+            }), 409
+
     date_applied_value = None
     if field == "status" and value == "Applied":
         row = db.execute(
@@ -240,7 +300,8 @@ def api_update_job():
                 (value, company, date_added, position_title or "", row_link or ""),
             )
         db.commit()
-    except sqlite3.IntegrityError:
+    except _WRITE_EXC:
+        # Backstop for a collision the SELECT above raced past.
         return jsonify({
             "error": f"A job for '{value}' on {date_added} already exists."
         }), 409
