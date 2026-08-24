@@ -35,9 +35,21 @@ so a glob can pick up a stale file. Everything below is unchanged either way.
 
 ## Step 2 — Preview
 
+Every command from here on must load `.env` first:
+
 ```bash
+set -a; source .env; set +a
 python scripts/parse_applied_jobs.py
 ```
+
+**Do not skip the `source`.** Neither `parse_applied_jobs.py` nor `src/jobs_db.py`
+calls `load_dotenv()`, so from a plain shell `TURSO_DATABASE_URL` is unset,
+`_use_libsql()` returns False, and the importer writes `data/jobs.db` instead of
+Turso — a file the GUI no longer reads. The rows land, every count reconciles,
+and the jobs are invisible. This has already happened once: 101 rows went to the
+local file and had to be re-imported from the archive.
+
+The script prints which database it wrote to. Read that line; do not assume it.
 
 Dry run — writes nothing. It prints every row as NEW or DUP, plus within-file duplicates collapsed and records skipped.
 
@@ -52,9 +64,22 @@ Records skipped for **no company name** are unrecoverable by the parser — the 
 
 ## Step 3 — Back up the DB
 
+Back up **Turso**, the database being written. Copying `data/jobs.db` preserves a
+file the import never touches.
+
 ```bash
-cp data/jobs.db "data/jobs.db.bak-$(date +%Y%m%d-%H%M%S)"
-sqlite3 data/jobs.db "select count(*) from jobs;"
+set -a; source .env; set +a
+python - <<'EOF'
+import os, json, datetime, libsql
+c = libsql.connect(os.environ["TURSO_DATABASE_URL"].strip(),
+                   auth_token=os.environ["TURSO_AUTH_TOKEN"].strip())
+cur = c.execute("select * from jobs")
+cols = [d[0] for d in cur.description]
+rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+path = "data/jobs.turso.bak-%s.json" % datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+json.dump(rows, open(path, "w"))
+print("backed up %d rows -> %s" % (len(rows), path))
+EOF
 ```
 
 Keep that row count — Step 5 checks against it.
@@ -64,10 +89,15 @@ Keep that row count — Step 5 checks against it.
 ## Step 4 — Import
 
 ```bash
+set -a; source .env; set +a
 python scripts/parse_applied_jobs.py --write --clear
 ```
 
-`--write` inserts new rows into `data/jobs.db` and **merges** into rows already there. `--clear` copies the inbox to `data/applied_inbox_archive/applied_inbox_<timestamp>.json`, then resets the inbox to `[]` for the next export.
+Confirm the final line says `in Turso`. If it says `in data/jobs.db`, the `.env`
+did not load — nothing is lost, but re-run against the archived export (Step 4's
+`--clear` already saved it) with the environment set before reporting success.
+
+`--write` inserts new rows into the tracker DB and **merges** into rows already there. `--clear` copies the inbox to `data/applied_inbox_archive/applied_inbox_<timestamp>.json`, then resets the inbox to `[]` for the next export.
 
 A merge only ever fills blanks, refreshes `location`, and moves a status *forward*. It never touches `contacts`, `notes`, `outreach_date` or `followup_log`, and never downgrades a status, so re-running the same export is safe. Rows matching an **archived** job are reported and skipped — nothing is resurrected. Every run writes `data/applied_inbox_archive/merge_<timestamp>.log` recording exactly which columns changed.
 
@@ -76,19 +106,29 @@ A merge only ever fills blanks, refreshes `location`, and moves a status *forwar
 ## Step 5 — Verify the row delta
 
 ```bash
-sqlite3 data/jobs.db "select count(*) from jobs;"
+set -a; source .env; set +a
+python -c "
+import os, libsql
+c = libsql.connect(os.environ['TURSO_DATABASE_URL'].strip(),
+                   auth_token=os.environ['TURSO_AUTH_TOKEN'].strip())
+print(c.execute('select count(*) from jobs').fetchall()[0][0])"
 ```
 
 **The row count must rise by exactly the number of rows the parser reported as new.** Updated rows must not move it at all — a merge edits a row in place, so a rise larger than the new count means a merge inserted instead of updating, which is the duplicate-row bug this path was built to end. A rise *smaller* than the new count means rows overwrote each other on the primary key `(company, date_added, position_title, link)` and data was silently lost. Either way, find the collisions before reporting success:
 
 ```bash
+set -a; source .env; set +a
 python - <<'EOF'
 import json, collections, importlib.util, sys, glob
 sys.path.insert(0, ".")
 spec = importlib.util.spec_from_file_location("paj", "scripts/parse_applied_jobs.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-archive = max(glob.glob("data/applied_inbox_archive/*.json"))
-rows = m.parse_export(json.load(open(archive)))["rows"]
+archive = max(glob.glob("data/applied_inbox_archive/applied_inbox_*.json"))
+# include_unsubmitted must match the flags the import ran with. Left at its
+# default against an --all export, parse_export drops every record and returns
+# an empty list -- which reads as "no collisions" and proves nothing.
+rows = m.parse_export(json.load(open(archive)), include_unsubmitted=True)["rows"]
+print("parsed rows:", len(rows))
 c = collections.Counter(
     (r["company"], r["date_added"], r["position_title"], r["link"]) for r in rows)
 for k, v in c.items():
@@ -99,24 +139,38 @@ EOF
 
 Identical keys mean the same posting URL twice — a true duplicate in the source, which collapses correctly. Anything else is a bug in the parser's field mapping — report it rather than papering over it.
 
-To confirm coverage, every row the preview marked `NEW ` should now exist in the DB. Rows marked `UPDT`/`SAME` keep their **original** `date_added`, so they will not match the incoming record's key — that is the merge working, not a miss:
+To confirm coverage, check the parsed rows against the DB directly. Do **not**
+re-run `classify_rows` here: after a successful write every row classifies as
+`unchanged`, so `groups["new"]` is empty and the loop passes without testing
+anything. Rows marked `UPDT`/`SAME` keep their **original** `date_added`, so they
+will not match the incoming record's key — that is the merge working, not a miss:
 
 ```bash
+set -a; source .env; set +a
 python - <<'EOF'
-import json, sqlite3, importlib.util, sys, glob
+import json, importlib.util, sys, glob
 sys.path.insert(0, ".")
 spec = importlib.util.spec_from_file_location("paj", "scripts/parse_applied_jobs.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-archive = max(glob.glob("data/applied_inbox_archive/*.json"))
-rows = m.parse_export(json.load(open(archive)))["rows"]
-have = set(sqlite3.connect("data/jobs.db").execute(
-    "select company, date_added, position_title, link from jobs"))
-groups = m.classify_rows(rows)
-for r in groups["new"]:
-    if (r["company"], r["date_added"], r["position_title"], r["link"]) not in have:
-        print("MISSING:", r["company"], "|", r["position_title"])
+archive = max(glob.glob("data/applied_inbox_archive/applied_inbox_*.json"))
+rows = m.parse_export(json.load(open(archive)), include_unsubmitted=True)["rows"]
+conn = m.get_all_jobs.__globals__["_connect"]()   # same driver the import used
+# Build tuples explicitly: libSQL rows are _ShimRow, which is unhashable, so
+# set(cursor) raises TypeError instead of giving you a set of keys.
+have = {(r["company"], r["date_added"], r["position_title"], r["link"])
+        for r in conn.execute(
+            "select company, date_added, position_title, link from jobs").fetchall()}
+miss = [r for r in rows
+        if (r["company"], r["date_added"], r["position_title"], r["link"]) not in have]
+print("present: %d/%d" % (len(rows) - len(miss), len(rows)))
+for r in miss:
+    print("MISSING:", r["company"], "|", r["position_title"])
 EOF
 ```
+
+Rows that matched an **archived** job are reported missing here and should be —
+they were skipped on purpose. Expect the miss count to equal the archived-match
+count from Step 2.
 
 ---
 
@@ -157,7 +211,7 @@ Records are dropped when `_api_c2_is_invalid` is set, when `company_name` is bla
 | Flag | Effect |
 |---|---|
 | *(none)* | dry-run preview |
-| `--write` | upsert new rows into `data/jobs.db` |
+| `--write` | upsert new rows into the tracker DB — Turso when `.env` is sourced, `data/jobs.db` otherwise |
 | `--clear` | with `--write`: archive the inbox, then empty it |
 | `--all` | include records whose application was never submitted (they land as `Tracking`) |
 | `--skip-existing` | do not merge into rows already in the tracker; report and ignore them |
