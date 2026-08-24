@@ -128,6 +128,59 @@
 </header>
 <main>
 
+  <div class="card">
+    <h2>Coming up</h2>
+    <div class="sub">
+      Interviews that are on the calendar but have not happened yet. A booking is not
+      evidence a round took place — invites get cancelled — so none of these counts toward
+      any rate until it is marked as held.
+    </div>
+    {% set soon = upcoming | selectattr("overdue") | list
+                  + (upcoming | rejectattr("overdue")
+                              | selectattr("days_away", "le", upcoming_window) | list) %}
+    {% set later = upcoming | rejectattr("overdue")
+                            | rejectattr("days_away", "le", upcoming_window) | list %}
+    {% if soon %}
+    <table>
+      <thead><tr><th>Company</th><th>Role</th><th>Type</th><th>Date</th><th class="num">When</th></tr></thead>
+      <tbody>
+        {% for u in soon %}
+          <tr>
+            <td>{{ u.company }}</td>
+            <td>{{ u.position_title }}</td>
+            <td>{{ (u.type_label or u.interview_type).replace("_", " ") }}</td>
+            <td>{{ u.scheduled_date }}</td>
+            <td class="num">
+              {% if u.overdue %}<span class="rate bad">{{ -u.days_away }}d overdue</span>
+              {% elif u.days_away == 0 %}today
+              {% else %}in {{ u.days_away }}d{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if later %}
+    <p class="muted" style="font-size:13px;margin:8px 0 0;">
+      +{{ later | length }} booked beyond {{ upcoming_window }} days — next on {{ later[0].scheduled_date }}.
+    </p>
+    {% endif %}
+    <div class="note">
+      A booking whose date has passed with no outcome recorded shows as
+      <strong>overdue</strong> rather than disappearing — either it happened and was never
+      logged, or it never happened. Both are worth seeing; silently hiding it is how the
+      interview log drifts away from reality. The {{ upcoming_window }}-day window narrows
+      the table, never the truth: anything further out is counted on the line above.
+    </div>
+    {% elif later %}
+    <p class="muted" style="font-size:13px;margin:0;">
+      Nothing in the next {{ upcoming_window }} days — {{ later | length }} booked later,
+      next on {{ later[0].scheduled_date }}.
+    </p>
+    {% else %}
+    <p class="muted" style="font-size:13px;margin:0;">Nothing booked.</p>
+    {% endif %}
+  </div>
+
   <div class="source-bar">
     <div class="state">
       Showing <span id="sourceLabel">all tracked jobs</span>
@@ -296,43 +349,6 @@
   </div>
 
   <div class="card">
-    <h2>Coming up</h2>
-    <div class="sub">
-      Interviews that are on the calendar but have not happened yet. A booking is not
-      evidence a round took place — invites get cancelled — so none of these counts toward
-      any rate until it is marked as held.
-    </div>
-    {% if upcoming %}
-    <table>
-      <thead><tr><th>Company</th><th>Role</th><th>Type</th><th>Date</th><th class="num">When</th></tr></thead>
-      <tbody>
-        {% for u in upcoming %}
-          <tr>
-            <td>{{ u.company }}</td>
-            <td>{{ u.position_title }}</td>
-            <td>{{ (u.type_label or u.interview_type).replace("_", " ") }}</td>
-            <td>{{ u.scheduled_date }}</td>
-            <td class="num">
-              {% if u.overdue %}<span class="rate bad">{{ -u.days_away }}d overdue</span>
-              {% elif u.days_away == 0 %}today
-              {% else %}in {{ u.days_away }}d{% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <div class="note">
-      A booking whose date has passed with no outcome recorded shows as
-      <strong>overdue</strong> rather than disappearing — either it happened and was never
-      logged, or it never happened. Both are worth seeing; silently hiding it is how the
-      interview log drifts away from reality.
-    </div>
-    {% else %}
-    <p class="muted" style="font-size:13px;margin:0;">Nothing booked.</p>
-    {% endif %}
-  </div>
-
-  <div class="card">
     <h2>Silence</h2>
     <div class="sub">
       Two different events. <strong>Ghosted</strong> means someone engaged — an interview
@@ -418,6 +434,7 @@
       <strong>{{ coverage.captured }}</strong> captured
       {%- if coverage.suspected_uncaptured %} &middot;
       <strong>{{ coverage.suspected_uncaptured }}</strong> suspected uncaptured{% endif %}
+      &middot; both count <em>roles</em>
     </p>
     {% if recruiters %}
     <table>
@@ -474,9 +491,12 @@
     </table>
     {% endif %}
     <div class="note">
-      Identity is the sender address for email, and the profile slug for LinkedIn —
+      Identity is the sender address for email, and the sender's display name for LinkedIn —
       InMail arrives from a shared relay (<code>inmail-hit-reply@linkedin.com</code>),
-      so the address identifies LinkedIn, not the person. <strong>Read-only here</strong>:
+      so the address identifies LinkedIn, not the person, and the body carries no profile
+      link to fall back on. One role can appear under two recruiters when two agencies pitch
+      it, so the <em>Roles</em> column can total more than the captured count above; that is
+      two relationships on one role, not a miscount. <strong>Read-only here</strong>:
       rows are written by <code>inbox-triage</code>, never from this page — a suspected row is
       closed out by re-running it against the original message, which is the only place the
       recruiter's identity can actually be read.
