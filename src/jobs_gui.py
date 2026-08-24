@@ -10,6 +10,7 @@ Run:
 Then open http://127.0.0.1:5151 in your browser.
 """
 
+import gzip
 import io
 import os
 import sys
@@ -26,6 +27,7 @@ from src.jobs_db import (  # noqa: E402
     STATUS_ORDER,
     _connect,
     _WRITE_EXC,
+    shared_connection as _shared_connection,
     GHOSTED_AFTER_DAYS,
     RATE_MIN_DENOMINATOR,
     add_interview,
@@ -53,6 +55,26 @@ EDITABLE_COLUMNS = {
 STATUS_VALUES = STATUS_ORDER
 
 app = Flask(__name__)
+# Flask sorts JSON keys by default. On /api/jobs that is 1014 dicts of 11 keys
+# reordered for nobody's benefit.
+app.json.sort_keys = False
+
+
+@app.before_request
+def _open_scope():
+    """
+    Every request runs inside one shared_connection().
+
+    It has to be here rather than inside get_db(), because the handlers that
+    cost the most never call get_db() at all: insights_view goes straight to the
+    jobs_db helpers, and each of those opened its own connection -- seven helpers,
+    eleven connections, ~2.1s of the 4.6s that page took.
+
+    Wrapping unconditionally is free because the scope connects lazily, so the
+    routes that only render a template still pay nothing.
+    """
+    g.db_scope = _shared_connection(create=True)
+    g.db = g.db_scope.__enter__()
 
 
 def get_db():
@@ -64,16 +86,43 @@ def get_db():
     Turso, so a single page read two different databases -- the local file was
     153 jobs behind, and the table quietly showed the smaller set.
     """
-    if "db" not in g:
-        g.db = _connect(create=True)
+    if "db" not in g:                      # outside a request (tests, shell)
+        g.db_scope = _shared_connection(create=True)
+        g.db = g.db_scope.__enter__()
     return g.db
 
 
 @app.teardown_appcontext
 def close_db(exception=None):
-    db = g.pop("db", None)
-    if db is not None:
-        db.close()
+    scope = g.pop("db_scope", None)
+    g.pop("db", None)
+    if scope is not None:
+        scope.__exit__(None, None, None)   # closes the one real connection
+
+
+# Level 1, not 9: /api/jobs shrinks 980KB -> 290KB either way, and the cheapest
+# setting spends 14ms doing it. The database work behind that response is ~250ms,
+# so the response itself was the larger half of the wait.
+_GZIP_MIN_BYTES = 8192
+
+
+@app.after_request
+def _compress(response):
+    if (response.direct_passthrough
+            or response.status_code < 200 or response.status_code >= 300
+            or "gzip" not in request.headers.get("Accept-Encoding", "").lower()
+            or "Content-Encoding" in response.headers
+            or response.content_length is not None
+            and response.content_length < _GZIP_MIN_BYTES):
+        return response
+    data = response.get_data()
+    if len(data) < _GZIP_MIN_BYTES:
+        return response
+    response.set_data(gzip.compress(data, 1))
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Content-Length"] = response.content_length
+    response.headers.add("Vary", "Accept-Encoding")
+    return response
 
 
 @app.route("/")

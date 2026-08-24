@@ -23,7 +23,8 @@ from bs4 import BeautifulSoup
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.jobs_db import (  # noqa: E402
-    COLUMNS, _use_libsql, get_all_jobs, status_rank, update_job_fields, upsert_job
+    COLUMNS, _use_libsql, get_all_jobs, shared_connection, status_rank,
+    update_job_fields, upsert_job
 )
 
 P = "_api_c2_"
@@ -458,19 +459,23 @@ def main() -> int:
             print("(--clear only takes effect alongside --write; the input file is untouched.)")
         return 0
 
-    for row in groups["new"]:
-        upsert_job(row)
-
-    # Address each update to the key of the row we FOUND, never the key implied
-    # by the incoming record: date_added comes from ApplyPass's datetime_matched,
-    # which drifts when a job is re-matched, and keying off it made INSERT OR
-    # REPLACE miss the row and insert a duplicate carrying the same link.
+    # One connection for the whole write pass. upsert_job and update_job_fields
+    # each open their own otherwise, and against Turso that is ~84ms apiece --
+    # 8.5s of pure connecting on a 101-row import, dwarfing the writes.
     updated = 0
-    for _row, match, updates in groups["updates"]:
-        if update_job_fields(match["company"], match.get("date_added") or "", updates,
-                             position_title=match.get("position_title"),
-                             link=match.get("link")):
-            updated += 1
+    with shared_connection(create=True):
+        for row in groups["new"]:
+            upsert_job(row)
+
+        # Address each update to the key of the row we FOUND, never the key implied
+        # by the incoming record: date_added comes from ApplyPass's datetime_matched,
+        # which drifts when a job is re-matched, and keying off it made INSERT OR
+        # REPLACE miss the row and insert a duplicate carrying the same link.
+        for _row, match, updates in groups["updates"]:
+            if update_job_fields(match["company"], match.get("date_added") or "", updates,
+                                 position_title=match.get("position_title"),
+                                 link=match.get("link")):
+                updated += 1
 
     # Name the database actually written to: with TURSO_DATABASE_URL set this
     # is the cloud DB, and reporting the local path there is how you end up
