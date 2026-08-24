@@ -384,7 +384,7 @@
 </head>
 <body>
 <header>
-  <h1>Job Tracker — local cache</h1>
+  <h1>Job Tracker</h1>
   <nav class="view-nav">
     <a href="/">Table</a>
     <a href="/kanban" class="active">Kanban</a>
@@ -647,12 +647,36 @@ function makeCard(job) {
   return card;
 }
 
-function openModal(job) {
+// /api/jobs no longer ships job_summary -- it was two thirds of the payload and
+// nothing on the board displays it. The modal is the only thing that wants it,
+// and it already opens on click, so it fetches its own. Held on the job object
+// afterwards: the edit box here is the only writer.
+async function openModal(job) {
   const backdrop = document.getElementById('modalBackdrop');
   const panel = document.getElementById('modalPanel');
   panel.innerHTML = '';
-  panel.appendChild(buildModalContent(job));
   backdrop.classList.remove('hidden');
+
+  if (typeof job.job_summary !== 'string') {
+    panel.textContent = 'Loading…';
+    try {
+      const params = new URLSearchParams({
+        company: job.company || '',
+        date_added: job.date_added || '',
+        position_title: job.position_title || '',
+        link: job.link || '',
+      });
+      const res = await fetch('/api/jobs/detail?' + params.toString());
+      const data = await res.json();
+      job.job_summary = data.job_summary || '';
+    } catch (err) {
+      job.job_summary = '';
+    }
+    if (backdrop.classList.contains('hidden')) return;  // closed while loading
+    panel.innerHTML = '';
+  }
+
+  panel.appendChild(buildModalContent(job));
   refreshMarkdownFields(panel);
 }
 

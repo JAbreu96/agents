@@ -1,5 +1,6 @@
 """
-Local SQLite job tracker — source of truth (data/jobs.db).
+The job tracker's data layer — Turso when TURSO_DATABASE_URL is set, the local
+SQLite file at data/jobs.db otherwise.
 
 Usage:
     from src.jobs_db import get_job, get_followup_log, update_followup_log, upsert_job, delete_job
@@ -12,6 +13,23 @@ import sqlite3
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+from dotenv import load_dotenv
+
+# Loaded here, in the module every entry point goes through, because which
+# database you get used to depend on whether your import chain happened to
+# reach something that called load_dotenv(). The GUI did (via job_agent) and
+# read Turso; parse_applied_jobs.py and the job_tracker MCP server did not and
+# wrote data/jobs.db. The two stores drifted 153 rows apart before anyone
+# noticed, and an ApplyPass import of 101 rows landed in the file nothing reads.
+#
+# By absolute path, not find_dotenv(): the MCP server and the cron scripts do
+# not run from the repo root, and a cwd-relative search silently finds nothing
+# and falls back to local -- reintroducing the same split without an error.
+#
+# override=False, so a caller that has already exported TURSO_DATABASE_URL (or
+# unset it deliberately, as tests/conftest.py does) still wins.
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"), override=False)
+
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "jobs.db")
 
 COLUMNS = [
@@ -19,6 +37,13 @@ COLUMNS = [
     "date_added", "contacts", "notes", "outreach_date", "date_applied",
     "status", "followup_log"
 ]
+
+# What the jobs list ships. job_summary is two thirds of the payload by bytes and
+# is never in the table and never searched -- it is fetched per row on expand
+# instead. Derived from COLUMNS rather than written out, so a column added there
+# reaches the GUI without a second edit. `notes` deliberately stays: the search
+# box matches against it, so the whole table needs it in hand.
+LIST_COLUMNS = [c for c in COLUMNS if c != "job_summary"]
 
 
 _JOBS_DDL = """
@@ -129,6 +154,16 @@ def _use_libsql() -> bool:
 # not even its own libsql.Error. _ensure_schema relies on a duplicate-column
 # ALTER TABLE failing predictably, so both have to be caught.
 _SCHEMA_EXC: tuple = (sqlite3.OperationalError, ValueError)
+
+# Same divergence on the write side: a PRIMARY KEY collision surfaces as
+# sqlite3.IntegrityError locally and as a bare ValueError over Hrana. Callers
+# that turn a collision into a user-facing message need both.
+#
+# This is a backstop, not the mechanism. ValueError is wide enough to swallow an
+# unrelated bug and report it as "already exists", and tests/conftest.py strips
+# TURSO_* for the whole session, so no test can ever prove what libSQL actually
+# raises. Detect collisions with an explicit SELECT first; catch this after.
+_WRITE_EXC: tuple = (sqlite3.IntegrityError, ValueError)
 
 
 class _ShimRow(dict):

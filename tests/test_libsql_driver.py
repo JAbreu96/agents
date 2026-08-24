@@ -128,6 +128,21 @@ def test_sqlite_specific_sql_still_works(shimmed):
 
 # --- driver selection -------------------------------------------------------
 
+def test_importing_jobs_db_does_not_arm_the_cloud_driver():
+    """
+    jobs_db calls load_dotenv() at import so every entry point agrees on which
+    database it is talking to. That import runs during collection, before any
+    fixture, and .env carries a real TURSO_DATABASE_URL -- so this asserts the
+    conftest guard still wins and the suite is pointed at a local file.
+
+    Without this, the failure is silent and expensive: conftest's own docstring
+    records a run that wrote 138 job rows, 78 interviews and 4 recruiters into
+    the production database.
+    """
+    assert jobs_db._use_libsql() is False
+    assert not os.environ.get("TURSO_DATABASE_URL")
+
+
 def test_sqlite_is_the_default(monkeypatch):
     monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
     assert jobs_db._use_libsql() is False

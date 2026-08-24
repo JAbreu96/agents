@@ -382,7 +382,7 @@
 </head>
 <body>
 <header>
-  <h1>Job Tracker — local cache</h1>
+  <h1>Job Tracker</h1>
   <nav class="view-nav">
     <a href="/" class="active">Table</a>
     <a href="/kanban">Kanban</a>
@@ -666,23 +666,56 @@ function render() {
     detailRow.dataset.key = key;
     const detailTd = document.createElement('td');
     detailTd.colSpan = 6;
-    detailTd.appendChild(buildDetailGrid(job));
     detailRow.appendChild(detailTd);
 
-    mainRow.addEventListener('click', () => toggleRow(mainRow, detailRow));
+    // Left empty on purpose. Building the panel here is what made this page
+    // fetch every job's interview rounds on load -- the row is only hidden by
+    // CSS, so a builder that fetches runs for all of them. toggleRow is the
+    // mount point now: nothing is built or fetched until a row is opened.
+    mainRow.addEventListener('click', () => toggleRow(mainRow, detailRow, job, detailTd));
 
     tbody.appendChild(mainRow);
     tbody.appendChild(detailRow);
   }
 }
 
-function toggleRow(mainRow, detailRow) {
+async function toggleRow(mainRow, detailRow, job, detailTd) {
   const collapsed = detailRow.classList.toggle('collapsed');
   mainRow.classList.toggle('expanded', !collapsed);
-  if (!collapsed) refreshMarkdownFields(detailRow);
+  if (collapsed) return;
+
+  detailTd.textContent = 'Loading…';
+  let detail;
+  try {
+    detail = await fetchJobDetail(job);
+  } catch (err) {
+    detailTd.textContent = 'Failed to load — check the server logs.';
+    return;
+  }
+  // Still open? A fast collapse-and-move-on should not repaint.
+  if (detailRow.classList.contains('collapsed')) return;
+
+  detailTd.textContent = '';
+  detailTd.appendChild(buildDetailGrid(job, detail.interviews));
+  refreshMarkdownFields(detailRow);
 }
 
-function buildDetailGrid(job) {
+// job_summary is written in one place only -- the edit box in this panel -- so
+// once it is on the job object it cannot go stale and is never re-requested.
+// Interview rounds have a second writer, inbox-triage on a daily cron, so they
+// are read fresh on every expand and deliberately not stored on the job.
+async function fetchJobDetail(job) {
+  const params = new URLSearchParams(jobKeyFields(job));
+  const haveSummary = typeof job.job_summary === 'string';
+  if (haveSummary) params.set('summary', '0');
+  const res = await fetch('/api/jobs/detail?' + params.toString());
+  if (!res.ok) throw new Error('detail fetch failed');
+  const data = await res.json();
+  if (!haveSummary) job.job_summary = data.job_summary || '';
+  return data;
+}
+
+function buildDetailGrid(job, rounds) {
   const grid = document.createElement('div');
   grid.className = 'detail-grid';
 
@@ -692,7 +725,7 @@ function buildDetailGrid(job) {
   grid.appendChild(makeFollowupField('Follow-up Log', job, 'followup_log'));
   grid.appendChild(makeMarkdownField('Job Description', job, 'job_summary'));
   grid.appendChild(makeMarkdownField('Notes', job, 'notes'));
-  grid.appendChild(makeInterviewsField(job));
+  grid.appendChild(makeInterviewsField(job, rounds));
   grid.appendChild(makeDeleteField(job));
 
   return grid;
@@ -781,7 +814,7 @@ async function hydrateFunnelFilter() {
   }
 }
 
-function makeInterviewsField(job) {
+function makeInterviewsField(job, rounds) {
   const wrap = document.createElement('div');
   wrap.className = 'detail-field interviews-field';
 
@@ -789,10 +822,12 @@ function makeInterviewsField(job) {
   label.textContent = 'Interview Rounds';
   wrap.appendChild(label);
 
+  // Rounds arrive with the panel, so this renders synchronously -- no
+  // placeholder, and no fetch reachable from a builder.
   const list = document.createElement('div');
   list.className = 'interview-list';
-  list.textContent = 'Loading…';
   wrap.appendChild(list);
+  renderInterviews(job, list, rounds);
 
   const form = document.createElement('div');
   form.className = 'interview-form';
@@ -863,7 +898,7 @@ function makeInterviewsField(job) {
     const data = await res.json();
     if (!res.ok) { err.textContent = data.error || 'Could not log that round.'; return; }
     loopInput.value = ''; notesInput.value = ''; ratingSel.value = ''; labelInput.value = '';
-    loadInterviews(job, list);
+    reloadInterviews(job, list);
   });
 
   for (const el of [typeSel, labelInput, dateInput, ratingSel, loopInput, notesInput, btn]) {
@@ -873,14 +908,21 @@ function makeInterviewsField(job) {
   wrap.appendChild(form);
   wrap.appendChild(err);
 
-  loadInterviews(job, list);
   return wrap;
 }
 
-async function loadInterviews(job, list) {
+// Only after this panel writes a round. Reads the same detail endpoint the
+// expand used, minus job_summary, so one job's rounds refresh without touching
+// the table.
+async function reloadInterviews(job, list) {
   const params = new URLSearchParams(jobKeyFields(job));
-  const res = await fetch('/api/interviews?' + params.toString());
-  const rounds = await res.json();
+  params.set('summary', '0');
+  const res = await fetch('/api/jobs/detail?' + params.toString());
+  const data = await res.json();
+  renderInterviews(job, list, data.interviews || []);
+}
+
+function renderInterviews(job, list, rounds) {
   list.innerHTML = '';
   if (!rounds.length) {
     list.innerHTML = '<span class="interview-empty">No rounds logged.</span>';
@@ -910,7 +952,7 @@ async function loadInterviews(job, list) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({id: r.id}),
       });
-      loadInterviews(job, list);
+      reloadInterviews(job, list);
     });
     row.appendChild(del);
     list.appendChild(row);
