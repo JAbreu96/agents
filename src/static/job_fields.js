@@ -220,6 +220,105 @@ const JobFields = (function () {
     return false;
   }
 
+  // --- Recruiters ----------------------------------------------------------
+
+  /*
+   * The recruiter list, fetched once per page and shared by every combobox.
+   * Refreshed after a create so a recruiter you just added is selectable on the
+   * next row without a reload.
+   */
+  let _recruiters = null;
+  let _recruitersInFlight = null;
+
+  async function loadRecruiters(force) {
+    if (_recruiters && !force) return _recruiters;
+    if (_recruitersInFlight && !force) return _recruitersInFlight;
+    _recruitersInFlight = fetch('/api/recruiters')
+      .then(r => r.json())
+      .then(d => { _recruiters = d.recruiters || []; return _recruiters; })
+      .finally(() => { _recruitersInFlight = null; });
+    return _recruitersInFlight;
+  }
+
+  function recruiterLabel(r) {
+    if (!r) return '';
+    const name = r.recruiter_name || r.name || '(unnamed)';
+    const agency = r.recruiter_agency || r.agency;
+    return agency ? `${name} — ${agency}` : name;
+  }
+
+  /*
+   * The pill shown against a job that came through a recruiter.
+   *
+   * Derived from the link rather than stored: a job's recruiter is already a
+   * fact in recruiter_jobs, so a tag column would be a second copy of it that
+   * could disagree. Returns null when there is nothing to show.
+   */
+  function recruiterBadge(job) {
+    if (!job.recruiter_id) return null;
+    const pill = document.createElement('span');
+    pill.className = 'recruiter-pill'
+      + (job.recruiter_from_triage ? ' from-triage' : '');
+    pill.textContent = job.recruiter_agency || job.recruiter_name || 'Recruiter';
+    pill.title = recruiterLabel(job)
+      + (job.recruiter_from_triage ? ' (linked by inbox-triage)' : '');
+    return pill;
+  }
+
+  /*
+   * Writes the job/recruiter link. Separate from saveField because this is not
+   * a jobs column -- see the /api/jobs/recruiter docstring.
+   *
+   * Resolves {ok, blocked} rather than throwing on the 409, because a blocked
+   * write is an expected answer here: it means the link belongs to a message
+   * and the caller should offer an override.
+   */
+  async function saveJobRecruiter(job, recruiterId, override) {
+    const res = await fetch('/api/jobs/recruiter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company: job.company,
+        date_added: job.date_added,
+        position_title: job.position_title,
+        link: job.link,
+        recruiter_id: recruiterId,
+        override: !!override,
+      }),
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* no body */ }
+    if (res.ok) {
+      const r = data.recruiter;
+      job.recruiter_id = r ? r.recruiter_id : null;
+      job.recruiter_name = r ? r.recruiter_name : null;
+      job.recruiter_agency = r ? r.recruiter_agency : null;
+      job.recruiter_from_triage = !!(r && r.message_id);
+      return { ok: true };
+    }
+    if (res.status === 409) {
+      return { ok: false, blocked: data.blocked || [], error: data.error };
+    }
+    alert(data.error || 'Failed to set the recruiter.');
+    return { ok: false, blocked: [] };
+  }
+
+  async function createRecruiter(fields) {
+    const res = await fetch('/api/recruiters/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* no body */ }
+    if (!res.ok) {
+      alert(data.error || 'Failed to create the recruiter.');
+      return null;
+    }
+    await loadRecruiters(true);
+    return data.recruiter;
+  }
+
   // --- Builder factory -----------------------------------------------------
 
   /*
@@ -477,6 +576,170 @@ const JobFields = (function () {
       return wrap;
     }
 
+    // --- Recruiter --------------------------------------------------------
+
+    /*
+     * Picks the recruiter a job came through, or creates one inline.
+     *
+     * Inline creation matters more than it looks: the moment you want to record
+     * an agency is while you are looking at the job they sent, and a trip to a
+     * separate page to do it is where the habit dies.
+     *
+     * A link inbox-triage made renders read-only behind an explicit override,
+     * because replacing it silently would be undone by the next triage run --
+     * see set_job_recruiter.
+     */
+    function makeRecruiterField(job, onChanged) {
+      const wrap = labelled(wrapper(), 'Recruiter');
+      const body = document.createElement('div');
+      body.className = 'recruiter-field';
+      guard(body);
+      wrap.appendChild(body);
+
+      const redraw = () => { body.innerHTML = ''; paint(); };
+      const changed = () => { if (typeof onChanged === 'function') onChanged(job); };
+
+      function paint() {
+        if (job.recruiter_id && job.recruiter_from_triage) {
+          paintLocked();
+        } else {
+          paintPicker();
+        }
+      }
+
+      function paintLocked() {
+        const shown = document.createElement('span');
+        shown.className = 'recruiter-current';
+        shown.textContent = recruiterLabel(job);
+        body.appendChild(shown);
+
+        const note = document.createElement('span');
+        note.className = 'recruiter-provenance';
+        note.textContent = 'linked from a message';
+        body.appendChild(note);
+
+        const override = document.createElement('button');
+        override.type = 'button';
+        override.className = 'linklike';
+        override.textContent = 'Change anyway';
+        override.addEventListener('click', (e) => {
+          if (cfg.stopClicks) e.stopPropagation();
+          if (!confirm(
+            'This link came from an email inbox-triage processed. Changing it '
+            + 'means the next run will not put it back, and the reason is noted '
+            + 'on the recruiter it replaces.\n\nChange it?')) return;
+          job.recruiter_from_triage = false;   // unlocked for this edit only
+          body.dataset.override = '1';
+          redraw();
+        });
+        body.appendChild(override);
+      }
+
+      function paintPicker() {
+        const select = document.createElement('select');
+        select.className = 'recruiter-select';
+        guard(select);
+
+        const none = document.createElement('option');
+        none.value = '';
+        none.textContent = '— none —';
+        select.appendChild(none);
+
+        const list = _recruiters || [];
+        for (const r of list) {
+          const opt = document.createElement('option');
+          opt.value = String(r.id);
+          opt.textContent = recruiterLabel(r);
+          if (job.recruiter_id === r.id) opt.selected = true;
+          select.appendChild(opt);
+        }
+
+        const create = document.createElement('option');
+        create.value = '__new__';
+        create.textContent = '＋ Create new recruiter…';
+        select.appendChild(create);
+
+        select.addEventListener('change', async () => {
+          if (select.value === '__new__') { paintCreate(select); return; }
+          const id = select.value ? Number(select.value) : null;
+          const res = await saveJobRecruiter(job, id, body.dataset.override === '1');
+          if (!res.ok && res.blocked && res.blocked.length) {
+            // Raced with a triage run between paint and save.
+            job.recruiter_from_triage = true;
+            redraw();
+            return;
+          }
+          delete body.dataset.override;
+          select.classList.remove('saved-flash');
+          void select.offsetWidth;
+          select.classList.add('saved-flash');
+          changed();
+        });
+        body.appendChild(select);
+      }
+
+      function paintCreate(select) {
+        const form = document.createElement('div');
+        form.className = 'recruiter-new';
+
+        const mk = (ph, required) => {
+          const i = document.createElement('input');
+          i.type = 'text';
+          i.placeholder = ph + (required ? ' (required)' : '');
+          guard(i);
+          return i;
+        };
+        const nameEl = mk('Name', true);
+        const agencyEl = mk('Agency', false);
+        // Required because it is the identity: without it a later message from
+        // the same person arrives as a second recruiter instead of this one.
+        const emailEl = mk('Email', true);
+        form.append(nameEl, agencyEl, emailEl);
+
+        const save = document.createElement('button');
+        save.type = 'button';
+        save.textContent = 'Add & assign';
+        save.addEventListener('click', async (e) => {
+          if (cfg.stopClicks) e.stopPropagation();
+          if (!nameEl.value.trim() || !emailEl.value.trim()) {
+            alert('A name and an email address are both required.');
+            return;
+          }
+          save.disabled = true;
+          const created = await createRecruiter({
+            name: nameEl.value.trim(),
+            agency: agencyEl.value.trim(),
+            email: emailEl.value.trim(),
+          });
+          save.disabled = false;
+          if (!created) return;
+          const res = await saveJobRecruiter(job, created.id,
+                                             body.dataset.override === '1');
+          if (res.ok) { delete body.dataset.override; changed(); }
+          redraw();
+        });
+
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'linklike';
+        cancel.textContent = 'Cancel';
+        cancel.addEventListener('click', (e) => {
+          if (cfg.stopClicks) e.stopPropagation();
+          redraw();
+        });
+
+        form.append(save, cancel);
+        select.replaceWith(form);
+        nameEl.focus();
+      }
+
+      // The list is shared, so the first field on the page pays for the fetch
+      // and the rest paint immediately.
+      loadRecruiters().then(redraw);
+      paint();
+      return wrap;
+    }
+
     // --- Delete -----------------------------------------------------------
 
     function makeDeleteField(job) {
@@ -500,6 +763,7 @@ const JobFields = (function () {
       renderFollowupField,
       makeDetailField,
       makeMarkdownField,
+      makeRecruiterField,
       makeDeleteField,
     };
   }
@@ -517,6 +781,11 @@ const JobFields = (function () {
     refreshMarkdownFields,
     saveField,
     deleteJob,
+    loadRecruiters,
+    recruiterBadge,
+    recruiterLabel,
+    saveJobRecruiter,
+    createRecruiter,
     create,
   };
 })();

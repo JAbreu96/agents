@@ -249,6 +249,32 @@
     font-size: 12px;
   }
   .followup-chip.non-date { color: var(--muted); font-style: italic; }
+
+  /* Recruiter: the pill on the row, and the picker in the detail panel. */
+  .recruiter-pill {
+    display: inline-flex;
+    align-items: center;
+    background: var(--card);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Dashed for a link inbox-triage made, so the rows you can freely change are
+     distinguishable from the ones an override would be needed to move. */
+  .recruiter-pill.from-triage { border-style: dashed; }
+  .recruiter-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .recruiter-select { min-width: 260px; }
+  .recruiter-current { font-weight: 600; }
+  .recruiter-provenance { color: var(--muted); font-size: 12px; font-style: italic; }
+  .recruiter-new { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .recruiter-new input { padding: 4px 6px; }
   .followup-chip button {
     background: none;
     border: none;
@@ -504,7 +530,7 @@ const {
 
 const {
   makeDateField, renderDateInput, makeFollowupField, renderFollowupField,
-  makeDetailField, makeMarkdownField, makeDeleteField,
+  makeDetailField, makeMarkdownField, makeRecruiterField, makeDeleteField,
 } = JobFields.create({
   fieldClass: 'detail-field',
   notesClass: ' notes-field',
@@ -641,6 +667,7 @@ function buildDetailGrid(job, rounds) {
   const grid = document.createElement('div');
   grid.className = 'detail-grid';
 
+  grid.appendChild(makeRecruiterField(job, () => render()));
   grid.appendChild(makeDetailField('Contacts', job, 'contacts'));
   grid.appendChild(makeDateField('Outreach Date', job, 'outreach_date'));
   grid.appendChild(makeDateField('Date Applied', job, 'date_applied'));
@@ -942,6 +969,9 @@ function makeCompanyCell(job) {
     }
   });
   wrap.appendChild(editable);
+
+  const pill = JobFields.recruiterBadge(job);
+  if (pill) wrap.appendChild(pill);
 
   if (job.link) {
     const a = document.createElement('a');

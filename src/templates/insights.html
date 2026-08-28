@@ -115,6 +115,22 @@
     border-left: 3px solid var(--border); padding-left: 12px; margin-top: 12px;
   }
   .empty { color: var(--muted); font-size: 14px; }
+
+  /* Recruiter editing on this page. */
+  .recruiter-add { margin: 0 0 12px; }
+  .recruiter-add-form {
+    display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .recruiter-add-form input { padding: 5px 7px; }
+  .r-actions { white-space: nowrap; text-align: right; }
+  .r-actions button { margin-left: 8px; }
+  .by-hand {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 0 5px; margin-left: 5px; color: var(--muted);
+  }
+  tr.r-editing input { width: 100%; padding: 4px 6px; }
 </style>
 </head>
 <body>
@@ -440,23 +456,45 @@
       <strong>{{ coverage.suspected_uncaptured }}</strong> suspected uncaptured{% endif %}
       &middot; both count <em>roles</em>
     </p>
+    <div class="recruiter-add">
+      <button type="button" class="linklike" id="addRecruiterToggle">＋ Add a recruiter</button>
+      <div class="recruiter-add-form" id="addRecruiterForm" hidden>
+        <input type="text" id="newRecruiterName" placeholder="Name (required)">
+        <input type="text" id="newRecruiterAgency" placeholder="Agency">
+        <input type="email" id="newRecruiterEmail" placeholder="Email (required)">
+        <button type="button" id="newRecruiterSave">Add</button>
+        <button type="button" class="linklike" id="newRecruiterCancel">Cancel</button>
+        <p class="muted" style="font-size:12px;margin:6px 0 0;width:100%;">
+          The email address is the identity — without it a later message from this
+          person arrives as a second recruiter rather than this row.
+        </p>
+      </div>
+    </div>
     {% if recruiters %}
     <table>
       <thead>
         <tr>
           <th>Recruiter</th><th>Agency</th><th>Via</th>
           <th class="num">Roles</th><th class="num">Replies</th><th>Last heard</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
         {% for r in recruiters %}
-          <tr>
-            <td>{{ r.name or r.identity }}</td>
-            <td>{{ r.agency or "—" }}</td>
-            <td>{{ "LinkedIn" if r.source == "linkedin" else "Email" }}</td>
+          <tr data-recruiter-id="{{ r.id }}"
+              data-roles="{{ r.role_count }}"
+              data-replies="{{ r.reply_count or 0 }}">
+            <td class="r-name">{{ r.name or r.identity }}</td>
+            <td class="r-agency">{{ r.agency or "—" }}</td>
+            <td>{{ "LinkedIn" if r.source == "linkedin" else "Email" }}{% if r.manual_entry %}
+              <span class="by-hand" title="Entered by hand; inbox-triage will not overwrite the name or agency">typed</span>{% endif %}</td>
             <td class="num">{{ r.role_count }}</td>
             <td class="num">{{ r.reply_count or 0 }}</td>
             <td>{{ r.last_seen or r.first_seen }}</td>
+            <td class="r-actions">
+              <button type="button" class="linklike r-edit">Edit</button>
+              <button type="button" class="linklike r-delete">Delete</button>
+            </td>
           </tr>
           {% for role in recruiter_roles if role.recruiter_identity == r.identity %}
             <tr class="sub-row">
@@ -465,7 +503,7 @@
                 {% if role.job_status %}{{ role.job_status }}
                 {% else %}<span class="muted">row missing</span>{% endif %}
               </td>
-              <td>{{ role.sourced_date }}</td>
+              <td colspan="2">{{ role.sourced_date }}</td>
             </tr>
           {% endfor %}
         {% endfor %}
@@ -500,9 +538,11 @@
       so the address identifies LinkedIn, not the person, and the body carries no profile
       link to fall back on. One role can appear under two recruiters when two agencies pitch
       it, so the <em>Roles</em> column can total more than the captured count above; that is
-      two relationships on one role, not a miscount. <strong>Read-only here</strong>:
-      rows are written by <code>inbox-triage</code>, never from this page — a suspected row is
-      closed out by re-running it against the original message, which is the only place the
+      two relationships on one role, not a miscount. Recruiters added here are keyed on their
+      email address, the same as one found in the inbox, so a later message from them lands on
+      the row you typed instead of making a second one — and <code>inbox-triage</code> will not
+      overwrite a name or agency you entered by hand. A <em>suspected</em> row is still best
+      closed out by re-running triage against the original message, which is the only place the
       recruiter's identity can actually be read.
     </div>
     {% else %}
@@ -671,6 +711,99 @@ document.querySelectorAll('.source-seg button').forEach(btn => {
 
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
 render();
+
+// --- Recruiter editing ------------------------------------------------------
+// This page is server-rendered, so every write reloads rather than patching the
+// DOM. The table carries role and reply counts per row, which is what lets the
+// delete confirm say what it is about to destroy before asking.
+
+async function postJSON(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* no body */ }
+  if (!res.ok) { alert(data.error || 'Request failed.'); return null; }
+  return data;
+}
+
+const addToggle = document.getElementById('addRecruiterToggle');
+const addForm = document.getElementById('addRecruiterForm');
+if (addToggle) {
+  addToggle.addEventListener('click', () => {
+    addForm.hidden = !addForm.hidden;
+    if (!addForm.hidden) document.getElementById('newRecruiterName').focus();
+  });
+  document.getElementById('newRecruiterCancel').addEventListener('click', () => {
+    addForm.hidden = true;
+  });
+  document.getElementById('newRecruiterSave').addEventListener('click', async (e) => {
+    const name = document.getElementById('newRecruiterName').value.trim();
+    const agency = document.getElementById('newRecruiterAgency').value.trim();
+    const email = document.getElementById('newRecruiterEmail').value.trim();
+    if (!name || !email) { alert('A name and an email address are both required.'); return; }
+    e.target.disabled = true;
+    const ok = await postJSON('/api/recruiters/add', { name, agency, email });
+    e.target.disabled = false;
+    if (ok) location.reload();
+  });
+}
+
+document.querySelectorAll('tr[data-recruiter-id]').forEach(row => {
+  const id = Number(row.dataset.recruiterId);
+  const nameCell = row.querySelector('.r-name');
+  const agencyCell = row.querySelector('.r-agency');
+  const editBtn = row.querySelector('.r-edit');
+  const delBtn = row.querySelector('.r-delete');
+
+  editBtn.addEventListener('click', async () => {
+    if (row.classList.contains('r-editing')) {
+      const name = nameCell.firstChild.value.trim();
+      const agency = agencyCell.firstChild.value.trim();
+      if (!name) { alert('A name is required.'); return; }
+      // Sent even when blank: a human clearing a wrong agency means it, which
+      // is exactly where this differs from a parser yielding nothing.
+      const ok = await postJSON('/api/recruiters/update',
+                                { recruiter_id: id, name, agency });
+      if (ok) location.reload();
+      return;
+    }
+    row.classList.add('r-editing');
+    editBtn.textContent = 'Save';
+    for (const [cell, val] of [[nameCell, nameCell.textContent.trim()],
+                               [agencyCell, agencyCell.textContent.trim()]]) {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = val === '\u2014' ? '' : val;
+      cell.textContent = '';
+      cell.appendChild(input);
+    }
+    nameCell.firstChild.focus();
+  });
+
+  delBtn.addEventListener('click', async () => {
+    const roles = Number(row.dataset.roles || 0);
+    const replies = Number(row.dataset.replies || 0);
+    const who = nameCell.textContent.trim();
+    // Naming the messages matters: they go too, and they are the only record of
+    // the conversation. Leaving them would orphan them against a dead id and
+    // triage could never re-import them.
+    const parts = [];
+    if (roles) parts.push(`unassign ${roles} job${roles === 1 ? '' : 's'}`);
+    parts.push('delete every recorded message for them');
+    if (!confirm(
+      `Delete ${who}?\n\nThis will ${parts.join(' and ')}. `
+      + 'Recorded messages cannot be re-imported from mail afterwards.\n\nContinue?'
+    )) return;
+    const res = await postJSON('/api/recruiters/delete', { recruiter_id: id });
+    if (res) {
+      alert(`Deleted ${who}: ${res.jobs} job link(s) and ${res.messages} message(s) removed.`);
+      location.reload();
+    }
+  });
+});
 </script>
 </body>
 </html>
