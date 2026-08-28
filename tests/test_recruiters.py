@@ -140,8 +140,10 @@ def test_manual_name_and_agency_survive_a_later_parse(db):
 
 def test_manual_row_still_learns_machine_facts(db):
     """Protection covers the human-owned fields only; discovery still works."""
+    # Both dates given explicitly: last_seen is a MAX, so letting either default
+    # to today makes the assertion depend on the day the suite runs.
     db.upsert_recruiter("email", "jo@agency.com", name="Joanna Reyes",
-                        manual_entry=True)
+                        manual_entry=True, seen_date="2026-01-01")
     db.upsert_recruiter("email", "jo@agency.com", agency_domain="agency.com",
                         seen_date="2026-08-27")
 
