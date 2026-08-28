@@ -23,9 +23,12 @@ LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d).log"
 
 echo "=== archive-jobs run: $(date) ===" >> "$LOG_FILE"
 
+# Pinned so an interactive /model change cannot alter what this scheduled job
+# runs. Full name, not the `sonnet` alias, which would drift on its own.
 claude -p "/archive-jobs" \
   --mcp-config .mcp.json \
   --strict-mcp-config \
+  --model claude-sonnet-5 \
   --allowedTools "mcp__job_tracker__archive_old_jobs,mcp__gmail_personal__send_email" \
   >> "$LOG_FILE" 2>&1
 

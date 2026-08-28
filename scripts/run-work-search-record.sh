@@ -23,9 +23,12 @@ LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d).log"
 
 echo "=== work-search-record run: $(date) ===" >> "$LOG_FILE"
 
+# Pinned so an interactive /model change cannot alter what this scheduled job
+# runs. Full name, not the `sonnet` alias, which would drift on its own.
 claude -p "/work-search-record" \
   --mcp-config .mcp.json \
   --strict-mcp-config \
+  --model claude-sonnet-5 \
   --allowedTools "mcp__gmail_personal__search_emails,mcp__gmail_personal__read_email,mcp__gmail_personal__send_email,Bash,Read,Edit,Write" \
   >> "$LOG_FILE" 2>&1
 

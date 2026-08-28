@@ -23,9 +23,12 @@ LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d).log"
 
 echo "=== application-digest run: $(date) ===" >> "$LOG_FILE"
 
+# Pinned so an interactive /model change cannot alter what this scheduled job
+# runs. Full name, not the `sonnet` alias, which would drift on its own.
 claude -p "/application-digest" \
   --mcp-config .mcp.json \
   --strict-mcp-config \
+  --model claude-sonnet-5 \
   --allowedTools "mcp__gmail_personal__search_emails,mcp__gmail_personal__read_email,mcp__gmail_personal__send_email,mcp__gmail_personal__draft_email,mcp__job_tracker__list_all_jobs,mcp__job_tracker__find_job_for_email,mcp__job_tracker__update_job_status" \
   >> "$LOG_FILE" 2>&1
 

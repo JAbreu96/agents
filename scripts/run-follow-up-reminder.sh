@@ -39,9 +39,12 @@ fi
 # own lines rather than inheriting an earlier run's error from the day's log.
 run_start=$(wc -l < "$LOG_FILE")
 
+# Pinned so an interactive /model change cannot alter what this scheduled job
+# runs. Full name, not the `sonnet` alias, which would drift on its own.
 claude -p "/follow-up-reminder" \
   --mcp-config .mcp.json \
   --strict-mcp-config \
+  --model claude-sonnet-5 \
   --allowedTools "mcp__job_tracker__list_jobs_needing_followup,mcp__job_tracker__update_notes,mcp__gmail_personal__send_email,mcp__gmail_personal__draft_email,mcp__gmail_personal__search_emails" \
   >> "$LOG_FILE" 2>&1
 

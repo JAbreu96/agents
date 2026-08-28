@@ -51,9 +51,23 @@ run_start=$(wc -l < "$LOG_FILE")
 # until Joel decides which address should reply to those threads.
 # gtasks__update is for appending [SUPERSEDED ...] notes; there is deliberately
 # no gtasks__delete or completion path, so triage can never destroy work.
+# Pin the model rather than inheriting it. Without this the scheduled run uses
+# whatever model was last chosen interactively, so typing /model in a terminal
+# silently changes what the cron job does -- which is how all five scheduled
+# jobs came to be pointed at Opus by an unrelated `/model opus`.
+#
+# The full name, not the `sonnet` alias: the alias tracks the latest Sonnet and
+# would reintroduce the same drift this line exists to stop.
+#
+# Sonnet is enough here because the error-prone half of triage is not model
+# judgement any more. Rejection, ask and sign-off detection, subject
+# normalisation and quoted-chain stripping all live in src/triage_rules.py
+# behind tests, and the Simplify labels route the rejection path. What is left
+# is following a long, prescriptive spec.
 claude -p "/inbox-triage" \
   --mcp-config .mcp.json \
   --strict-mcp-config \
+  --model claude-sonnet-5 \
   --allowedTools "mcp__gmail_personal__search_emails,mcp__gmail_personal__draft_email,mcp__gmail_alt__search_emails,mcp__job_tracker__find_job_for_email,mcp__job_tracker__update_job_status,mcp__job_tracker__update_notes,mcp__job_tracker__add_job,mcp__job_tracker__record_recruiter_outreach,mcp__job_tracker__record_recruiter_reply,mcp__job_tracker__list_recruiters,mcp__job_tracker__list_all_jobs,mcp__gtasks__list,mcp__gtasks__list_task_lists,mcp__gtasks__create,mcp__gtasks__update,Bash" \
   >> "$LOG_FILE" 2>&1
 
