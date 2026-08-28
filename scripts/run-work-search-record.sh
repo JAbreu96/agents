@@ -13,7 +13,14 @@ export HOME
 # one, and the cost is two lines.
 : "${USER:=$(id -un)}"
 export USER
-export PATH="$HOME/.nvm/versions/node/v18.20.4/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# pyenv's interpreter goes first because it is the only one with the `mcp`
+# package. A bare `python3` under launchd's PATH resolves to
+# /usr/local/opt/python@3.10/bin/python3.10, which does not have it, so the
+# job_tracker server in .mcp.json dies on import and simply never registers.
+# Interactive shells resolve python3 via pyenv shims and were always fine,
+# which is exactly why this stayed invisible.
+PYENV_BIN="$HOME/.pyenv/versions/3.10.3/bin"
+export PATH="$PYENV_BIN:$HOME/.nvm/versions/node/v18.20.4/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -22,6 +29,12 @@ mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d).log"
 
 echo "=== work-search-record run: $(date) ===" >> "$LOG_FILE"
+
+# Fail loudly on a pyenv upgrade rather than silently degrading again.
+if [ ! -x "$PYENV_BIN/python3" ]; then
+  echo "=== FAILED: $PYENV_BIN/python3 is missing (pyenv version changed?) ===" >> "$LOG_FILE"
+  exit 1
+fi
 
 # Pinned so an interactive /model change cannot alter what this scheduled job
 # runs. Full name, not the `sonnet` alias, which would drift on its own.
