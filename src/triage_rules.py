@@ -85,9 +85,91 @@ def strip_quoted_chain(body: str) -> str:
     return body[:cut].strip()
 
 
+# ------------------------------------------------------------------- html
+
+# Marketing HTML pads preheaders with characters that render as nothing but
+# survive tag-stripping, entity-unescaping and whitespace collapse. U+034F
+# (combining grapheme joiner) is the one that got through the first attempt --
+# it is not whitespace, so `\s` never touches it.
+_INVISIBLE = dict.fromkeys(
+    ord(c)
+    for c in (
+        "\u034f"          # combining grapheme joiner
+        "\u00ad"          # soft hyphen
+        "\u200b\u200c\u200d"   # zero-width space / non-joiner / joiner
+        "\u200e\u200f"    # left-to-right / right-to-left mark
+        "\u2060"          # word joiner
+        "\ufeff"          # zero-width no-break space (BOM)
+    )
+)
+
+# Indeed and Workday tracking links run to several hundred characters and carry
+# nothing a reader needs. The threshold is above any real posting URL.
+_LONG_URL = re.compile(r"https?://\S{80,}")
+
+# Every Unicode space separator, folded to a plain space before collapsing.
+# Indeed pads its layout with runs of U+2007 (figure space): after tags,
+# entities and zero-width characters were gone, 800 of the 1,038 surviving
+# characters in one message were this.
+_UNICODE_SPACE = re.compile(
+    "[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]"
+)
+
+_DROP_TAGS = ("script", "style", "head", "title", "noscript")
+
+
+def strip_html(body: str) -> str:
+    """Reduce an HTML email to the text a reader would actually see.
+
+    Inbound mail is overwhelmingly HTML, and a single Indeed message measured
+    55,491 characters -- around 1,700 of which were words. The rest was wrapper
+    markup, tracking URLs and invisible padding. Fetching a body without this
+    costs roughly 14,000 tokens to learn one sentence.
+
+    Plain-text bodies pass through with only whitespace collapsed: the tag pass
+    is a no-op on text that has no tags.
+    """
+    if not body:
+        return ""
+
+    if "<" in body and ">" in body:
+        from bs4 import BeautifulSoup
+
+        try:
+            soup = BeautifulSoup(body, "lxml")
+        except Exception:
+            soup = BeautifulSoup(body, "html.parser")
+        for tag in soup(_DROP_TAGS):
+            tag.decompose()
+        text = soup.get_text("\n")
+    else:
+        text = body
+
+    text = html.unescape(text)
+    text = _LONG_URL.sub("[long-url]", text)
+    text = text.translate(_INVISIBLE)
+    text = _UNICODE_SPACE.sub(" ", text)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    text = re.sub(r"\n{2,}", "\n", text)
+    return text.strip()
+
+
 # --------------------------------------------------------------- sentences
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
+
+_SMART_QUOTES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'"})
+
+
+def _fold(text: str) -> str:
+    """Casefold and straighten apostrophes.
+
+    Every phrase list here is written with a straight apostrophe, and mail
+    clients autocorrect to U+2019. Thrivent's "we won\u2019t be moving forward
+    with your application" read as neutral for exactly this reason.
+    """
+    return (text or "").translate(_SMART_QUOTES).casefold()
 
 
 def _sentences(text: str) -> list[str]:
@@ -118,7 +200,7 @@ def contains_ask(body: str) -> bool:
     missing a real ask costs an opportunity, while a false positive only means
     the message goes to the model for judgement.
     """
-    own = strip_quoted_chain(body).casefold()
+    own = _fold(strip_quoted_chain(body))
     if "?" in own:
         return True
     return any(phrase in own for phrase in _ASK_PHRASES)
@@ -189,6 +271,14 @@ _REJECTION_PHRASES = (
     "no longer under consideration", "not be moving ahead",
     "pursue other candidates", "went with another",
     "not selected", "unsuccessful on this occasion",
+    # Every one of these was a real rejection that read as neutral. Found by
+    # checking 15 messages Simplify had labelled `simplify/rejected` against
+    # this predicate: it agreed on 9 of them.
+    "not be moving forward",            # "we will not be moving forward with your candidacy"
+    "won't be moving forward",          # Thrivent, with a curly apostrophe
+    "different candidate",              # Intel: "decided to pursue a different candidate"
+    "unable to consider your application",
+    "not an ideal fit", "isn't an ideal fit",
 )
 
 
@@ -220,7 +310,7 @@ def detect_rejection(body: str) -> Optional[Rejection]:
     """Locate rejection language in the newest message's own text."""
     own = strip_quoted_chain(body)
     for sentence in _sentences(own):
-        lowered = sentence.casefold()
+        lowered = _fold(sentence)
         for phrase in _REJECTION_PHRASES:
             if phrase in lowered:
                 return Rejection(phrase=phrase, sentence=sentence)

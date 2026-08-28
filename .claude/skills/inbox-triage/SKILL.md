@@ -33,10 +33,13 @@ print('ask:      ', contains_ask(body))
 "
 ```
 
-`normalize_subject`, `is_from_joel`, `strip_quoted_chain` and `unescape_title` are there too.
-Every predicate strips the quoted reply chain first — `read_email` returns the history
-inline, and a scan over the raw body reads sign-offs and rejection language out of *earlier*
-messages, so every long thread eventually looks closed.
+`normalize_subject`, `is_from_joel`, `strip_quoted_chain`, `strip_html` and
+`unescape_title` are there too. Every predicate strips the quoted reply chain first — a
+fetched body carries the history inline, and a scan over the raw text reads sign-offs and
+rejection language out of *earlier* messages, so every long thread eventually looks closed.
+
+`scripts/read_mail.py` already applies `strip_html` and `strip_quoted_chain`, so its output
+goes straight to the predicates.
 
 ---
 
@@ -59,57 +62,162 @@ python3 -c "from src import jobs_db; print(jobs_db.get_meta('inbox_triage.last_s
 history, and say so in the report — a zero watermark on an inbox with a backlog means the
 backlog needs a supervised pass, not a silent 24-hour window that declares it processed.
 
-Capture the current time **before** searching — that becomes the new watermark at the end:
+Capture the current time **before** searching — it bounds the search window:
 
 ```bash
 python3 -c "import time; print(int(time.time()))"
 ```
 
+### A run is bounded; the watermark follows what was processed
+
+Process at most **400 messages per inbox**, taking the **oldest** first.
+
+Oldest-first is the load-bearing half. Gmail returns newest-first, so a capped run
+that took the newest 400 and then set the watermark to the captured time would skip
+everything older *permanently* — a silent loss dressed up as a safety feature. So the
+watermark advances to the internal date of the newest message actually processed, not
+to the captured time. Whatever is left is still ahead of the watermark and the next
+run picks it up.
+
+If a cap was hit, say so in Step 8 with the number remaining. A backlog that never
+shrinks means the cap is too low or the schedule too infrequent, and that is only
+visible if it is reported.
+
 ---
 
 ## Step 2 — Fetch new mail, and group it into threads
 
-Search each inbox with `after:<its own watermark>` (Gmail accepts epoch seconds),
-`maxResults: 100`. Pre-split wide windows into ~6h slices; a single wide search times out.
+Each inbox has its own set of queries. They are narrow on purpose: a run that listed
+everything cost ~17k tokens in subject lines alone, and most of what it listed was
+never going to be read.
 
-**Always append `-from:linkedin.com` to the primary query.** A Gmail filter forwards LinkedIn
-mail from `ajoelcrist@` into `joelchristabreu4044+linkedin@gmail.com`, so Joel sees it in the
-inbox he actually reads. Triage must ignore those copies: it reads the originals through
-`gmail_alt`, and the forwarded duplicate is the *same conversation* arriving a second time.
-The `thread:<id>` key cannot catch it — Gmail message and thread ids are per-account, so the
-two copies look like unrelated threads and would earn two tasks for one recruiter.
+### The queries
 
-Exclude on the **sender**, not the recipient. Gmail preserves the original `To:` header when
-it forwards, so the forwarded copy still reads `To: ajoelcrist@gmail.com` and
-`-to:joelchristabreu4044+linkedin@gmail.com` would quietly match nothing. `deliveredto:` is
-the precise operator if a recipient test is ever needed, but sender exclusion is simpler and
-costs nothing: native LinkedIn mail reaching the primary inbox is job-alert `noise` anyway.
+Substitute each inbox's own watermark. `maxResults: 100`; pre-split a wide window into
+~6h slices, because a single wide search times out.
 
-If more than 100 come back for a slice, narrow it further — never silently drop the overflow.
-This is not theoretical: a 60-result cap once hid Kim Hanson's *"please send an updated
-resume"* for four days.
+**Primary** (`mcp__gmail_personal__search_emails`):
 
-**Group before reading anything.** The search results include Joel's own sent mail, which is
-what makes this free:
+```
+1.  after:<wm> -from:linkedin.com label:simplify/rejected
+2.  after:<wm> -from:linkedin.com label:simplify/interviewing
+3.  after:<wm> -from:linkedin.com
+      -label:simplify/rejected -label:simplify/interviewing
+      -subject:"Security code for your application"
+      -subject:"Indeed Application:"
+      -subject:"EEO survey for"
+      -from:(dice.com OR glassdoor.com OR my.theladders.com OR simplify.jobs OR
+             match.indeed.com OR alert.refer.io OR trueup.io OR
+             us.greenhouse-jobs.com OR builtin.com)
+```
+
+**Alt** (`mcp__gmail_alt__search_emails`):
+
+```
+4.  after:<wm_alt> from:(hit-reply@linkedin.com OR inmail-hit-reply@linkedin.com)
+5.  after:<wm_alt> -from:linkedin.com
+      subject:(engineer OR developer OR hiring OR opportunity OR role OR position)
+```
+
+Measured over a 10-day window: primary 1127 → 847, alt 1131 → 103. Query 3's
+exclusions are only the four patterns that are *mechanically* meaningless — a security
+code, an Indeed submission receipt, an EEO survey, a job-alert sender. A broader ATS
+deny-list was considered and rejected: Greenhouse and Workday carry rejections and
+interview invitations as well as receipts, so excluding them by sender loses real mail.
+
+Query 5 replaces `category:primary`, which was measured and rejected — it returns ~40
+irrelevant messages (Petco, Bank of America, Discover, TLDR, Apple) and does **not**
+contain the one message it existed to recover.
+
+If more than 100 come back for a slice, narrow it further — never silently drop the
+overflow. This is not theoretical: a 60-result cap once hid Kim Hanson's *"please send
+an updated resume"* for four days.
+
+### Why LinkedIn is excluded from the primary queries
+
+A **Settings→Forwarding rule** (not a Gmail filter — `list_filters` returns empty on
+both accounts, which is why this was once thought stale) copies LinkedIn mail from
+`ajoelcrist@` into `joelchristabreu4044+linkedin@gmail.com`, so Joel sees it in the
+inbox he actually reads. Triage must ignore those copies: it reads the originals
+through `gmail_alt`, and the forwarded duplicate is the *same conversation* arriving a
+second time. The `thread:<id>` key cannot catch it — Gmail message and thread ids are
+per-account, so the two copies look like unrelated threads and would earn two tasks for
+one recruiter.
+
+Exclude on the **sender**, not the recipient. Gmail preserves the original `To:` header
+when it forwards, so the forwarded copy still reads `To: ajoelcrist@gmail.com` and
+`-to:joelchristabreu4044+linkedin@gmail.com` would quietly match nothing.
+`deliveredto:` is the precise operator if a recipient test is ever needed, but sender
+exclusion is simpler and costs nothing: native LinkedIn mail reaching the primary inbox
+is job-alert `noise` anyway.
+
+### Group before reading anything
+
+The search results include Joel's own sent mail, which is what makes this free:
 
 1. Compute `normalize_subject(subject)` for every result.
 2. Group by that key.
-3. If a group's **newest** message is `is_from_joel(from)`, Joel spoke last. The whole group
-   drops out here, before any body is fetched.
+3. If a group's **newest** message is `is_from_joel(from)`, Joel spoke last. The whole
+   group drops out here, before any body is fetched.
 
-Then read bodies with `read_email` **only** for the newest message of each surviving group,
-and only where Step 3 classifies it as something other than `noise`. Subject and sender are
-enough to discard noise, and bodies are expensive.
+### Reading bodies
 
-`read_email` returns `Thread ID:` — record it. It confirms the grouping (subjects drift, and
-two threads can share one), it is the task key in Step 5, and the quoted history in the same
-response gives you the other side's original text without a second call.
+**Do not call `read_email`.** It returns the raw payload. One Indeed message came back
+at 55,491 characters — large enough to overflow the tool-result cap and spill to disk —
+of which about 760 were words. Across a run that was ~100–140k tokens spent on markup.
+
+Use the script instead. It fetches through the same credentials, strips the HTML,
+tracking URLs and invisible padding, and cuts the quoted chain:
+
+```bash
+python3 scripts/read_mail.py --account primary <id> <id> <id> ...
+python3 scripts/read_mail.py --account alt --format json <id> ...
+```
+
+That same Indeed message comes back at 764 characters with the sender, role, company,
+location and the decisive *"This message is nonrepliable… log in"* line all intact.
+
+**Batch the ids** — one invocation per ~30 messages. The per-call overhead is what made
+even short messages expensive, and it is paid once per invocation, not once per message.
+
+Read bodies only for the newest message of each surviving group, and only where Step 3
+routes the group to a body read. Subject and sender are enough to discard noise, and a
+`simplify/rejected` message needs no body at all.
+
+The script prints `Thread ID:` — record it. It confirms the grouping (subjects drift,
+and two threads can share one) and it is the task key in Step 5.
 
 ---
 
 ## Step 3 — Classify
 
 Assign each thread exactly one category, judged on its **newest message**.
+
+### The Simplify labels come first
+
+Joel runs the Simplify browser extension, which labels application mail as it arrives.
+Two of its labels are trustworthy enough to route on, before any other test:
+
+| Label | Routing |
+|---|---|
+| `simplify/rejected` | `rejection`. **No body read.** Step 4 has the write rule |
+| `simplify/interviewing` | Read the body, then classify normally. The label decides only that this is worth opening |
+| `simplify/screen`, `simplify/offer` | Ignore. Fall through to the rules below |
+
+This is not a guess. Fifteen `simplify/rejected` messages were read in full and checked:
+**all fifteen were genuine rejections.** `detect_rejection` agreed with only nine of them
+at the time — the label was right and the predicate was short, which is the opposite of
+what was assumed. Six phrasings were added to `src/triage_rules.py` as a result, and it
+now agrees on fourteen. The fifteenth is an Indeed template whose body contains no
+rejection language at all, which is exactly the case the label exists to cover.
+
+`simplify/interviewing` **routes but never writes.** It says a process is live, not what
+just happened in it — a message in an interviewing thread can be a reschedule, a
+question, or a rejection. The body still decides. `simplify/offer` has fired twice ever
+and was wrong both times; it carries no information.
+
+Everything unlabelled — the whole alt inbox included — classifies exactly as it always
+has. The labels are a shortcut on the primary inbox, not a replacement for the rules.
 
 | Category | Test | Outcome |
 |---|---|---|
@@ -152,7 +260,22 @@ and any request that names him specifically.
 
 ## Step 4 — Update the tracker
 
-For every `rejection` and every status-advancing `human_action`/`deadline`:
+### A labelled rejection may be written without reading it
+
+For a message carrying `simplify/rejected`, take the company and role from the **subject
+line**, run the lookup in the numbered steps below, and then:
+
+| `match` | Action |
+|---|---|
+| `exact` | Set `Rejected`. Silent, and **no body is fetched** |
+| anything else | Fetch the body and follow the ordinary path below |
+
+The label decides *what kind of message this is*; `find_job_for_email` still decides
+*which row*. "Never guess a row" is untouched — an `ambiguous` or `none` result reads
+the body exactly as it always did. What the label buys is not permission to guess, it is
+permission to skip ~14k tokens of markup when the row is already unambiguous.
+
+For every other `rejection`, and every status-advancing `human_action`/`deadline`:
 
 1. Extract the company and the role title as quoted in the email, and pass the title through
    `unescape_title` before any lookup or write. Most of this mail is HTML, so an ampersand
@@ -234,7 +357,7 @@ same `message_id`:
 | `position_title` | this role alone, never two joined by a slash |
 | `name`, `agency`, `email` | as signed |
 | `account` | `primary`, or `alt` for the `ajoelcrist@` inbox |
-| `message_id`, `thread_id`, `subject` | from `read_email` |
+| `message_id`, `thread_id`, `subject` | from `scripts/read_mail.py` |
 | `notes` | the score and rationale, below |
 
 It creates the job row at status `Tracking` with a deterministic synthetic link, so
@@ -453,15 +576,24 @@ Drafts are never sent. Triage does not send email; it leaves work ready for Joel
 
 ## Step 7 — Advance the watermarks
 
-Only after Steps 4–6 succeeded, and **each inbox separately**:
+Only after Steps 4–6 succeeded, and **each inbox separately**.
+
+The value is the internal date of the **newest message actually processed** — not the
+time captured in Step 1. Those are the same thing only when the run was not capped, and
+using the captured time on a capped run skips the unprocessed remainder permanently.
 
 ```bash
-python3 -c "from src import jobs_db; jobs_db.set_meta('inbox_triage.last_seen','<captured_time>')"
-python3 -c "from src import jobs_db; jobs_db.set_meta('inbox_triage.last_seen_alt','<captured_time>')"
+python3 -c "from src import jobs_db; jobs_db.set_meta('inbox_triage.last_seen','<newest_processed_epoch>')"
+python3 -c "from src import jobs_db; jobs_db.set_meta('inbox_triage.last_seen_alt','<newest_processed_epoch>')"
 ```
 
 If one inbox failed, leave *its* watermark alone and advance the other. The next run
 reprocesses, and the `thread:<id>` duplicate check makes that safe.
+
+Never write a *label* to the mailbox to mark progress. A `triaged` label was considered
+and rejected: it would break exactly this property — a failed run that had already
+labelled its mail would not reprocess — and it writes to Joel's mailbox every day for
+the benefit of a value the `meta` table already holds. Triage is read-only against Gmail.
 
 ---
 
@@ -480,7 +612,13 @@ inbox-triage <date>
   untracked receipts: <n> not written — <company> (<role or "role not named">), …
   tasks: <n> created, <n> skipped as duplicates, <n> superseded
   interviews recorded: <n> held, <n> booked
+  backlog: <n> primary, <n> alt still ahead of the watermark
 ```
+
+The `backlog` line reports what the 400-per-inbox cap left behind. Zero is the normal
+reading. A number that appears once is a burst; a number that never shrinks across runs
+means the cap is too low or the schedule too infrequent, and neither is visible without
+this line.
 
 `tracker: <n> created` counts recruiter roles only, and must be 0 whenever
 `roles captured` is 0 — nothing else writes a row.
