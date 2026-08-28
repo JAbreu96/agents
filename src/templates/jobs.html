@@ -516,6 +516,7 @@
 <script src="{{ url_for('static', filename='job_fields.js') }}"></script>
 <script>
 const STATUS_VALUES = {{ status_values | tojson }};
+const INTERVIEW_TYPES = {{ interview_types|tojson }};
 let allJobs = [];
 
 // The field builders live in static/job_fields.js so the kanban modal can use
@@ -525,12 +526,13 @@ const {
   rowKey, localISODate, startOfWeekISO, isValidISODate,
   parseFollowupLog, serializeFollowupLog,
   renderMarkdownInto, appendInlineMarkdown,
-  checkMarkdownOverflow, refreshMarkdownFields, saveField,
+  checkMarkdownOverflow, refreshMarkdownFields, saveField, jobKeyFields,
 } = JobFields;
 
 const {
   makeDateField, renderDateInput, makeFollowupField, renderFollowupField,
-  makeDetailField, makeMarkdownField, makeRecruiterField, makeDeleteField,
+  makeDetailField, makeMarkdownField, makeRecruiterField, makeInterviewsField,
+  makeDeleteField,
 } = JobFields.create({
   fieldClass: 'detail-field',
   notesClass: ' notes-field',
@@ -539,6 +541,7 @@ const {
   stopClicks: true,
   tagFields: false,
   afterSave: () => updateGoalBadge(),
+  interviewTypes: INTERVIEW_TYPES,
   onDeleted: (job) => {
     allJobs = allJobs.filter(j => rowKey(j) !== rowKey(job));
     render();
@@ -680,20 +683,10 @@ function buildDetailGrid(job, rounds) {
   return grid;
 }
 
-const INTERVIEW_TYPES = {{ interview_types|tojson }};
 
 // The full composite key comes straight off the row the user opened, so an
 // interview is always attached to one specific posting - never matched by
 // company name, which is ambiguous for the companies you applied to twice.
-function jobKeyFields(job) {
-  return {
-    company: job.company || '',
-    date_added: job.date_added || '',
-    position_title: job.position_title || '',
-    link: job.link || '',
-  };
-}
-
 // --- Funnel drill-through ---------------------------------------------------
 // The Insights funnel links here with ?stage=&source=. Its stages are predicates
 // over several fields, not single status values, so they cannot ride the existing
@@ -760,177 +753,6 @@ async function hydrateFunnelFilter() {
     const rows = await (await fetch('/api/interviews')).json();
     funnelInterviewedKeys = new Set(rows.map(r => rowKey(r)));
     render();
-  }
-}
-
-function makeInterviewsField(job, rounds) {
-  const wrap = document.createElement('div');
-  wrap.className = 'detail-field interviews-field';
-
-  const label = document.createElement('label');
-  label.textContent = 'Interview Rounds';
-  wrap.appendChild(label);
-
-  // Rounds arrive with the panel, so this renders synchronously -- no
-  // placeholder, and no fetch reachable from a builder.
-  const list = document.createElement('div');
-  list.className = 'interview-list';
-  wrap.appendChild(list);
-  renderInterviews(job, list, rounds);
-
-  const form = document.createElement('div');
-  form.className = 'interview-form';
-
-  const typeSel = document.createElement('select');
-  for (const t of INTERVIEW_TYPES) {
-    const opt = document.createElement('option');
-    opt.value = t;
-    opt.textContent = t.replace(/_/g, ' ');
-    typeSel.appendChild(opt);
-  }
-
-  const labelInput = document.createElement('input');
-  labelInput.type = 'text';
-  labelInput.placeholder = 'describe it';
-  labelInput.style.display = 'none';
-  typeSel.addEventListener('change', () => {
-    labelInput.style.display = typeSel.value === 'other' ? '' : 'none';
-  });
-
-  // Which of the two dates this round carries. A round is booked or it is held,
-  // never both -- the API rejects both set -- so this picks the field rather
-  // than offering two date boxes that can contradict each other.
-  const whenSel = document.createElement('select');
-  whenSel.title = 'Whether this round has happened yet';
-  for (const [v, t] of [['occurred', 'happened on'], ['scheduled', 'booked for']]) {
-    const opt = document.createElement('option');
-    opt.value = v;
-    opt.textContent = t;
-    whenSel.appendChild(opt);
-  }
-
-  const dateInput = document.createElement('input');
-  dateInput.type = 'date';
-  dateInput.value = new Date().toISOString().slice(0, 10);
-  const syncWhen = () => {
-    const booked = whenSel.value === 'scheduled';
-    dateInput.title = booked ? 'Date the round is booked for'
-                             : 'Date the round actually happened';
-    // A booked round is not an outcome yet, so there is nothing to rate.
-    ratingSel.disabled = booked;
-    if (booked) ratingSel.value = '';
-    btn.textContent = booked ? 'Book Round' : 'Log Round';
-  };
-  whenSel.addEventListener('change', syncWhen);
-
-  const ratingSel = document.createElement('select');
-  ratingSel.title = 'How it felt (optional)';
-  for (const r of ['', '1', '2', '3', '4', '5']) {
-    const opt = document.createElement('option');
-    opt.value = r;
-    opt.textContent = r === '' ? 'rating —' : r;
-    ratingSel.appendChild(opt);
-  }
-
-  const loopInput = document.createElement('input');
-  loopInput.type = 'text';
-  loopInput.placeholder = 'loop id (same onsite)';
-  loopInput.title = 'Rounds sharing a loop id resolve together as one onsite';
-
-  const notesInput = document.createElement('input');
-  notesInput.type = 'text';
-  notesInput.placeholder = 'notes';
-
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'primary';
-  btn.textContent = 'Log Round';
-
-  const err = document.createElement('div');
-  err.className = 'interview-error';
-
-  btn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    err.textContent = '';
-    const body = Object.assign(jobKeyFields(job), {
-      interview_type: typeSel.value,
-      type_label: labelInput.value.trim(),
-      occurred_date: whenSel.value === 'occurred' ? dateInput.value : '',
-      scheduled_date: whenSel.value === 'scheduled' ? dateInput.value : '',
-      self_rating: ratingSel.value,
-      loop_id: loopInput.value.trim(),
-      notes: notesInput.value.trim(),
-    });
-    const res = await fetch('/api/interviews/add', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) { err.textContent = data.error || 'Could not save that round.'; return; }
-    loopInput.value = ''; notesInput.value = ''; ratingSel.value = ''; labelInput.value = '';
-    reloadInterviews(job, list);
-  });
-
-  syncWhen();
-
-  for (const el of [typeSel, labelInput, whenSel, dateInput, ratingSel, loopInput,
-                    notesInput, btn]) {
-    el.addEventListener('click', (e) => e.stopPropagation());
-    form.appendChild(el);
-  }
-  wrap.appendChild(form);
-  wrap.appendChild(err);
-
-  return wrap;
-}
-
-// Only after this panel writes a round. Reads the same detail endpoint the
-// expand used, minus job_summary, so one job's rounds refresh without touching
-// the table.
-async function reloadInterviews(job, list) {
-  const params = new URLSearchParams(jobKeyFields(job));
-  params.set('summary', '0');
-  const res = await fetch('/api/jobs/detail?' + params.toString());
-  const data = await res.json();
-  renderInterviews(job, list, data.interviews || []);
-}
-
-function renderInterviews(job, list, rounds) {
-  list.innerHTML = '';
-  if (!rounds.length) {
-    list.innerHTML = '<span class="interview-empty">No rounds logged.</span>';
-    return;
-  }
-  for (const r of rounds) {
-    const row = document.createElement('div');
-    row.className = 'interview-row';
-    const type = r.interview_type === 'other' && r.type_label
-      ? r.type_label : (r.interview_type || '').replace(/_/g, ' ');
-    // A booked round has no occurred_date; showing a blank there reads as a bug.
-    const bits = [r.occurred_date || ('booked ' + (r.scheduled_date || '?')), type];
-    if (r.loop_id) bits.push('loop: ' + r.loop_id);
-    if (r.self_rating) bits.push(r.self_rating + '/5');
-    if (r.notes) bits.push(r.notes);
-    const span = document.createElement('span');
-    span.textContent = bits.join(' · ');
-    row.appendChild(span);
-
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'linklike';
-    del.textContent = 'remove';
-    del.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await fetch('/api/interviews/delete', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id: r.id}),
-      });
-      reloadInterviews(job, list);
-    });
-    row.appendChild(del);
-    list.appendChild(row);
   }
 }
 

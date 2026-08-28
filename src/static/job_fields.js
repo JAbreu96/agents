@@ -61,6 +61,16 @@ const JobFields = (function () {
     return tokens.join(', ');
   }
 
+  /* The composite key that addresses a job, since `jobs` has no surrogate id. */
+  function jobKeyFields(job) {
+    return {
+      company: job.company || '',
+      date_added: job.date_added || '',
+      position_title: job.position_title || '',
+      link: job.link || '',
+    };
+  }
+
   function renderMarkdownInto(container, raw) {
     container.innerHTML = '';
     const lines = (raw || '').split('\n');
@@ -340,6 +350,7 @@ const JobFields = (function () {
       tagFields: false,
       afterSave: () => {},
       onDeleted: () => {},
+      interviewTypes: [],
     }, ctx || {});
 
     // The table's detail row collapses on any click that reaches it, so its
@@ -740,6 +751,178 @@ const JobFields = (function () {
       return wrap;
     }
 
+
+    // --- Interview rounds -------------------------------------------------
+    // Table-only until now, which is why rounds could not be touched from the
+    // board at all. INTERVIEW_TYPES comes in through cfg because it is a Jinja
+    // global in the templates, not something this file can see.
+
+    function makeInterviewsField(job, rounds) {
+      const wrap = labelled(wrapper(' interviews-field'), 'Interview Rounds');
+
+      // Rounds arrive with the panel, so this renders synchronously -- no
+      // placeholder, and no fetch reachable from a builder.
+      const list = document.createElement('div');
+      list.className = 'interview-list';
+      wrap.appendChild(list);
+      renderInterviews(job, list, rounds);
+
+      const form = document.createElement('div');
+      form.className = 'interview-form';
+
+      const typeSel = document.createElement('select');
+      for (const t of (cfg.interviewTypes || [])) {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t.replace(/_/g, ' ');
+        typeSel.appendChild(opt);
+      }
+
+      const labelInput = document.createElement('input');
+      labelInput.type = 'text';
+      labelInput.placeholder = 'describe it';
+      labelInput.style.display = 'none';
+      typeSel.addEventListener('change', () => {
+        labelInput.style.display = typeSel.value === 'other' ? '' : 'none';
+      });
+
+      // Which of the two dates this round carries. A round is booked or it is
+      // held, never both -- the API rejects both set -- so this picks the field
+      // rather than offering two date boxes that can contradict each other.
+      const whenSel = document.createElement('select');
+      whenSel.title = 'Whether this round has happened yet';
+      for (const [v, t] of [['occurred', 'happened on'], ['scheduled', 'booked for']]) {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = t;
+        whenSel.appendChild(opt);
+      }
+
+      const dateInput = document.createElement('input');
+      dateInput.type = 'date';
+      dateInput.value = localISODate(new Date());
+      const syncWhen = () => {
+        const booked = whenSel.value === 'scheduled';
+        dateInput.title = booked ? 'Date the round is booked for'
+                                 : 'Date the round actually happened';
+        // A booked round is not an outcome yet, so there is nothing to rate.
+        ratingSel.disabled = booked;
+        if (booked) ratingSel.value = '';
+        btn.textContent = booked ? 'Book Round' : 'Log Round';
+      };
+      whenSel.addEventListener('change', syncWhen);
+
+      const ratingSel = document.createElement('select');
+      ratingSel.title = 'How it felt (optional)';
+      for (const r of ['', '1', '2', '3', '4', '5']) {
+        const opt = document.createElement('option');
+        opt.value = r;
+        opt.textContent = r === '' ? 'rating —' : r;
+        ratingSel.appendChild(opt);
+      }
+
+      const loopInput = document.createElement('input');
+      loopInput.type = 'text';
+      loopInput.placeholder = 'loop id (same onsite)';
+      loopInput.title = 'Rounds sharing a loop id resolve together as one onsite';
+
+      const notesInput = document.createElement('input');
+      notesInput.type = 'text';
+      notesInput.placeholder = 'notes';
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'primary';
+      btn.textContent = 'Log Round';
+
+      const err = document.createElement('div');
+      err.className = 'interview-error';
+
+      btn.addEventListener('click', async (e) => {
+        if (cfg.stopClicks) e.stopPropagation();
+        err.textContent = '';
+        const body = Object.assign(jobKeyFields(job), {
+          interview_type: typeSel.value,
+          type_label: labelInput.value.trim(),
+          occurred_date: whenSel.value === 'occurred' ? dateInput.value : '',
+          scheduled_date: whenSel.value === 'scheduled' ? dateInput.value : '',
+          self_rating: ratingSel.value,
+          loop_id: loopInput.value.trim(),
+          notes: notesInput.value.trim(),
+        });
+        const res = await fetch('/api/interviews/add', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) { err.textContent = data.error || 'Could not save that round.'; return; }
+        loopInput.value = ''; notesInput.value = ''; ratingSel.value = ''; labelInput.value = '';
+        reloadInterviews(job, list);
+      });
+
+      syncWhen();
+
+      for (const el of [typeSel, labelInput, whenSel, dateInput, ratingSel, loopInput,
+                        notesInput, btn]) {
+        guard(el);
+        form.appendChild(el);
+      }
+      wrap.appendChild(form);
+      wrap.appendChild(err);
+
+      return wrap;
+    }
+
+    // Only after this panel writes a round. Reads the same detail endpoint the
+    // expand used, minus job_summary, so one job's rounds refresh without
+    // touching the table.
+    async function reloadInterviews(job, list) {
+      const params = new URLSearchParams(jobKeyFields(job));
+      params.set('summary', '0');
+      const res = await fetch('/api/jobs/detail?' + params.toString());
+      const data = await res.json();
+      renderInterviews(job, list, data.interviews || []);
+    }
+
+    function renderInterviews(job, list, rounds) {
+      list.innerHTML = '';
+      if (!rounds.length) {
+        list.innerHTML = '<span class="interview-empty">No rounds logged.</span>';
+        return;
+      }
+      for (const r of rounds) {
+        const row = document.createElement('div');
+        row.className = 'interview-row';
+        const type = r.interview_type === 'other' && r.type_label
+          ? r.type_label : (r.interview_type || '').replace(/_/g, ' ');
+        // A booked round has no occurred_date; a blank there reads as a bug.
+        const bits = [r.occurred_date || ('booked ' + (r.scheduled_date || '?')), type];
+        if (r.loop_id) bits.push('loop: ' + r.loop_id);
+        if (r.self_rating) bits.push(r.self_rating + '/5');
+        if (r.notes) bits.push(r.notes);
+        const span = document.createElement('span');
+        span.textContent = bits.join(' · ');
+        row.appendChild(span);
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'linklike';
+        del.textContent = 'remove';
+        del.addEventListener('click', async (e) => {
+          if (cfg.stopClicks) e.stopPropagation();
+          await fetch('/api/interviews/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: r.id}),
+          });
+          reloadInterviews(job, list);
+        });
+        row.appendChild(del);
+        list.appendChild(row);
+      }
+    }
+
     // --- Delete -----------------------------------------------------------
 
     function makeDeleteField(job) {
@@ -764,6 +947,9 @@ const JobFields = (function () {
       makeDetailField,
       makeMarkdownField,
       makeRecruiterField,
+      makeInterviewsField,
+      renderInterviews,
+      reloadInterviews,
       makeDeleteField,
     };
   }
@@ -775,6 +961,7 @@ const JobFields = (function () {
     isValidISODate,
     parseFollowupLog,
     serializeFollowupLog,
+    jobKeyFields,
     renderMarkdownInto,
     appendInlineMarkdown,
     checkMarkdownOverflow,

@@ -305,6 +305,48 @@
     align-items: center;
     gap: 6px;
   }
+  /* Interview rounds -- the modal had no counterpart to the table's field, so
+     rounds could only be logged from the table. Same rules, minus the grid
+     span: the modal is a single column. */
+  .interview-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+  .interview-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
+  }
+  .interview-empty { font-size: 13px; color: var(--muted); }
+  .interview-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .interview-form input, .interview-form select {
+    padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card); color: var(--text); font-size: 13px;
+  }
+  .interview-error { color: #d64545; font-size: 12px; margin-top: 6px; }
+
+  /* Recruiter, matching the table view's vocabulary. */
+  .recruiter-pill {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    background: var(--card);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 1px 8px;
+    margin-top: 2px;
+    font-size: 10px;
+    font-weight: 600;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .recruiter-pill.from-triage { border-style: dashed; }
+  .recruiter-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .recruiter-select { min-width: 240px; }
+  .recruiter-current { font-weight: 600; }
+  .recruiter-provenance { color: var(--muted); font-size: 12px; font-style: italic; }
+  .recruiter-new { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .recruiter-new input { padding: 4px 6px; }
+
   .followup-chip {
     display: inline-flex;
     align-items: center;
@@ -417,6 +459,7 @@
 <script src="{{ url_for('static', filename='job_fields.js') }}"></script>
 <script>
 const STATUS_VALUES = {{ status_values | tojson }};
+const INTERVIEW_TYPES = {{ interview_types|tojson }};
 // Blank status becomes its own "Not Tracked" column, placed first.
 const COLUMNS = ["", ...STATUS_VALUES.filter(s => s !== "")];
 const COLUMN_LABELS = { "": "Not Tracked" };
@@ -430,12 +473,13 @@ const {
   rowKey, localISODate, startOfWeekISO, isValidISODate,
   parseFollowupLog, serializeFollowupLog,
   renderMarkdownInto, appendInlineMarkdown,
-  checkMarkdownOverflow, refreshMarkdownFields, saveField,
+  checkMarkdownOverflow, refreshMarkdownFields, saveField, jobKeyFields,
 } = JobFields;
 
 const {
   makeDateField, renderDateInput, makeFollowupField, renderFollowupField,
-  makeDetailField, makeMarkdownField, makeDeleteField,
+  makeDetailField, makeMarkdownField, makeRecruiterField, makeInterviewsField,
+  makeDeleteField,
 } = JobFields.create({
   fieldClass: 'modal-field',
   notesClass: '',
@@ -444,6 +488,7 @@ const {
   tagFields: true,
   // A date edit can change which column a card belongs in, so redraw the board.
   afterSave: () => render(),
+  interviewTypes: INTERVIEW_TYPES,
   onDeleted: (job) => {
     allJobs = allJobs.filter(j => rowKey(j) !== rowKey(job));
     closeModal();
@@ -541,6 +586,9 @@ function makeCard(job) {
   title.textContent = job.position_title || '';
   card.appendChild(title);
 
+  const pill = JobFields.recruiterBadge(job);
+  if (pill) card.appendChild(pill);
+
   const meta = document.createElement('div');
   meta.className = 'meta';
   const loc = document.createElement('span');
@@ -580,24 +628,24 @@ async function openModal(job) {
   panel.innerHTML = '';
   backdrop.classList.remove('hidden');
 
-  if (typeof job.job_summary !== 'string') {
-    panel.textContent = 'Loading…';
-    try {
-      const params = new URLSearchParams({
-        company: job.company || '',
-        date_added: job.date_added || '',
-        position_title: job.position_title || '',
-        link: job.link || '',
-      });
-      const res = await fetch('/api/jobs/detail?' + params.toString());
-      const data = await res.json();
-      job.job_summary = data.job_summary || '';
-    } catch (err) {
-      job.job_summary = '';
-    }
-    if (backdrop.classList.contains('hidden')) return;  // closed while loading
-    panel.innerHTML = '';
+  // Always fetched, not only when the summary is missing: rounds have a second
+  // writer -- inbox-triage on a daily cron -- so they are re-read every open and
+  // never cached, while job_summary has one writer and is kept for the page.
+  panel.textContent = 'Loading…';
+  const haveSummary = typeof job.job_summary === 'string';
+  try {
+    const params = new URLSearchParams(jobKeyFields(job));
+    if (haveSummary) params.set('summary', '0');
+    const res = await fetch('/api/jobs/detail?' + params.toString());
+    const data = await res.json();
+    if (!haveSummary) job.job_summary = data.job_summary || '';
+    job._rounds = data.interviews || [];
+  } catch (err) {
+    if (!haveSummary) job.job_summary = '';
+    job._rounds = [];
   }
+  if (backdrop.classList.contains('hidden')) return;  // closed while loading
+  panel.innerHTML = '';
 
   panel.appendChild(buildModalContent(job));
   refreshMarkdownFields(panel);
@@ -671,12 +719,14 @@ function buildModalContent(job) {
   frag.appendChild(head);
 
   frag.appendChild(buildModalStatusField(job));
+  frag.appendChild(makeRecruiterField(job, () => render()));
   frag.appendChild(makeDetailField('Contacts', job, 'contacts'));
   frag.appendChild(makeDateField('Outreach Date', job, 'outreach_date'));
   frag.appendChild(makeDateField('Date Applied', job, 'date_applied'));
   frag.appendChild(makeFollowupField('Follow-up Log', job, 'followup_log'));
   frag.appendChild(makeMarkdownField('Job Description', job, 'job_summary'));
   frag.appendChild(makeMarkdownField('Notes', job, 'notes'));
+  frag.appendChild(makeInterviewsField(job, job._rounds || []));
   frag.appendChild(makeDeleteField(job));
 
   return frag;

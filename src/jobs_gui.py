@@ -141,7 +141,10 @@ def index():
 
 @app.route("/kanban")
 def kanban():
-    return render_template("kanban.html", status_values=STATUS_VALUES)
+    # interview_types is new here: the board's modal can log rounds now, which
+    # the table could always do and it could not.
+    return render_template("kanban.html", status_values=STATUS_VALUES,
+                           interview_types=INTERVIEW_TYPES)
 
 
 @app.route("/api/jobs")
