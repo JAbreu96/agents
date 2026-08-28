@@ -280,3 +280,31 @@ def test_recruiter_link_is_not_an_editable_job_column(client):
                                                 "field": "recruiter_id",
                                                 "value": "1"})
     assert res.status_code == 400
+
+
+def test_non_numeric_recruiter_id_is_a_400_not_a_500(client):
+    """
+    A body like {"recruiter_id": "abc"} reached int() unguarded and raised,
+    so these two routes answered 500 where api_delete_interview -- a few lines
+    above them in the same file -- answers 400 for the same mistake.
+    """
+    for route in ("/api/recruiters/delete", "/api/recruiters/update"):
+        res = client.post(route, json={"recruiter_id": "abc", "name": "x"})
+        assert res.status_code == 400, route
+
+
+def test_setting_a_job_recruiter_rejects_a_non_numeric_id(client):
+    res = client.post("/api/jobs/recruiter",
+                      json={**_keys(client), "recruiter_id": "abc"})
+    assert res.status_code == 400
+
+
+def test_clearing_a_job_recruiter_is_still_allowed(client):
+    """
+    The guard above must not catch null: clearing the link is a legitimate
+    request, and only a present-but-unparseable value is an error.
+    """
+    res = client.post("/api/jobs/recruiter",
+                      json={**_keys(client), "recruiter_id": None})
+    assert res.status_code == 200
+    assert res.get_json()["recruiter"] is None

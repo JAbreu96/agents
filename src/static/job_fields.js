@@ -8,11 +8,14 @@
  * field by field. Notably `makeInterviewsField` was only ever written for the
  * table, so interview rounds could not be edited from the board at all.
  *
- * The two copies differed on exactly four axes, all of them presentational,
- * which is what makes one parameterised set possible:
+ * What the two copies disagreed about was presentation and callbacks, never the
+ * shape of a field -- which is what makes one parameterised set possible.
+ * `create(ctx)` takes those disagreements as config:
  *
  *   fieldClass  The table wraps fields in `.detail-field` inside an expanded
  *               row; the modal wraps them in `.modal-field`.
+ *   notesClass  The table gives its roomy text fields `.notes-field`; the modal
+ *               has one column and does not.
  *   stopClicks  A click inside the table's detail row bubbles up to the row
  *               handler and collapses it, so every interactive element there
  *               stops propagation. The modal has no such ancestor handler.
@@ -20,6 +23,8 @@
  *               find them again when it rebuilds; the table re-renders instead.
  *   afterSave   Saving a date refreshes the table's goal badge, but re-renders
  *               the whole board on kanban (a date can move a card).
+ *   onDeleted   The table re-renders after a delete; the modal closes first.
+ *   interviewTypes  A Jinja global in both templates, which this file cannot see.
  *
  * Everything else -- the markdown renderer, the follow-up chips, the ISO date
  * validation, `saveField` itself -- was byte-identical between the two files

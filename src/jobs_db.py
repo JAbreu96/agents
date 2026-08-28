@@ -1782,15 +1782,19 @@ def _note_recruiter_override(protected: list[dict], key: tuple,
     """
     stamp = date.today().isoformat()
     company, date_added, position_title, _link = key
-    for e in protected:
-        note = (
-            f"{stamp}: link to {company} — {position_title or '(no title)'} "
-            f"({date_added}) replaced by hand"
-            + (f" with recruiter {recruiter_id}" if recruiter_id else " and cleared")
-            + f"; was from message {e.get('message_id')}."
-        )
-        conn = _connect(create=True)
-        try:
+
+    # One connection for every note, not one each. A remote connect costs ~84ms
+    # (see shared_connection), and two agencies pitching the same role is exactly
+    # when this runs -- so the loop is where the cost would land.
+    conn = _connect(create=True)
+    try:
+        for e in protected:
+            note = (
+                f"{stamp}: link to {company} — {position_title or '(no title)'} "
+                f"({date_added}) replaced by hand"
+                + (f" with recruiter {recruiter_id}" if recruiter_id else " and cleared")
+                + f"; was from message {e.get('message_id')}."
+            )
             conn.execute(
                 "UPDATE recruiters SET notes = "
                 "  CASE WHEN notes IS NULL OR notes = '' THEN ? "
@@ -1798,9 +1802,9 @@ def _note_recruiter_override(protected: list[dict], key: tuple,
                 "WHERE id = ?",
                 (note, note, e["recruiter_id"]),
             )
-            conn.commit()
-        finally:
-            conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def update_recruiter(recruiter_id: int, name: Optional[str] = None,

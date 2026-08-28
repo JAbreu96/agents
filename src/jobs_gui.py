@@ -470,6 +470,21 @@ def _recruiter_payload():
     )
 
 
+def _recruiter_id(payload):
+    """
+    The recruiter id as an int, or None when it is absent or not a number.
+
+    Same shape as api_delete_interview's inline check, factored out because
+    three routes need it. Without it a body like {"recruiter_id": "abc"} reaches
+    int() unguarded and answers 500, where every other id-taking route here
+    answers 400.
+    """
+    try:
+        return int(payload.get("recruiter_id"))
+    except (TypeError, ValueError):
+        return None
+
+
 @app.route("/api/recruiters/add", methods=["POST"])
 def api_add_recruiter():
     """
@@ -501,8 +516,8 @@ def api_add_recruiter():
 @app.route("/api/recruiters/update", methods=["POST"])
 def api_update_recruiter():
     name, agency, email, notes, payload = _recruiter_payload()
-    recruiter_id = payload.get("recruiter_id")
-    if not recruiter_id:
+    recruiter_id = _recruiter_id(payload)
+    if recruiter_id is None:
         return jsonify({"error": "recruiter_id is required"}), 400
 
     # None means "not sent, leave alone"; "" means "the user cleared it".
@@ -516,9 +531,9 @@ def api_update_recruiter():
     if "name" in fields and not fields["name"].strip():
         return jsonify({"error": "A name is required."}), 400
 
-    if not update_recruiter(int(recruiter_id), **fields):
+    if not update_recruiter(recruiter_id, **fields):
         return jsonify({"error": "No such recruiter."}), 404
-    row = next((r for r in get_recruiters() if r["id"] == int(recruiter_id)), None)
+    row = next((r for r in get_recruiters() if r["id"] == recruiter_id), None)
     return jsonify({"ok": True, "recruiter": row})
 
 
@@ -531,11 +546,11 @@ def api_delete_recruiter():
     so the confirm dialog can name what it destroyed rather than saying "done".
     """
     payload = request.get_json(force=True) or {}
-    recruiter_id = payload.get("recruiter_id")
-    if not recruiter_id:
+    recruiter_id = _recruiter_id(payload)
+    if recruiter_id is None:
         return jsonify({"error": "recruiter_id is required"}), 400
 
-    res = delete_recruiter(int(recruiter_id))
+    res = delete_recruiter(recruiter_id)
     if not res.get("ok"):
         return jsonify({"error": res.get("error", "Delete failed.")}), 404
     return jsonify(res)
@@ -561,7 +576,16 @@ def api_set_job_recruiter():
     if not company or date_added is None:
         return jsonify({"error": "company and date_added are required"}), 400
 
-    recruiter_id = payload.get("recruiter_id")
+    # null or absent clears the link, which is a legitimate request; a value
+    # that is present but not a number is not.
+    raw_recruiter = payload.get("recruiter_id")
+    recruiter_id = None
+    if raw_recruiter not in (None, ""):
+        recruiter_id = _recruiter_id(payload)
+        if recruiter_id is None:
+            return jsonify({"error": "recruiter_id must be a number, or null "
+                                     "to clear the link."}), 400
+
     key = dict(
         company=company,
         date_added=date_added,
@@ -571,7 +595,7 @@ def api_set_job_recruiter():
 
     res = set_job_recruiter(
         **key,
-        recruiter_id=int(recruiter_id) if recruiter_id else None,
+        recruiter_id=recruiter_id,
         override=bool(payload.get("override")),
     )
     if not res["ok"]:
