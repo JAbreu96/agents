@@ -763,3 +763,42 @@ def test_an_orphan_link_cannot_be_inherited_by_the_next_recruiter(db):
     reused = db.upsert_recruiter("email", "next@a.com", name="Next")
     assert reused == doomed          # SQLite really does hand the id back
     assert db.get_recruiter_jobs(reused) == []
+
+
+def test_dry_run_counts_without_destroying(db):
+    """
+    The confirm dialog needs both numbers before the user commits, and the
+    count must come from the same query the delete uses -- reply_count filters
+    direction = 'reply' and would understate what goes.
+    """
+    key = _job(db, "Acme", "Platform Engineer", "https://acme.test/jobs/1")
+    rid = db.upsert_recruiter("email", "one@a.com", name="One")
+    db.link_recruiter_job(rid, sourced_date="2026-08-20", **key)
+    db.record_recruiter_message(rid, "inbound", "2026-08-20", message_id="M1")
+    db.record_recruiter_message(rid, "reply", "2026-08-21", message_id="M2")
+
+    preview = db.delete_recruiter(rid, dry_run=True)
+    assert (preview["ok"], preview["jobs"], preview["messages"]) == (True, 1, 2)
+    assert preview["dry_run"] is True
+
+    # Nothing moved.
+    assert len(db.get_recruiters()) == 1
+    assert len(db.get_recruiter_jobs(rid)) == 1
+    assert len(db.get_recruiter_messages(rid)) == 2
+
+    # And the real delete agrees with the preview.
+    real = db.delete_recruiter(rid)
+    assert (real["jobs"], real["messages"]) == (preview["jobs"], preview["messages"])
+
+
+def test_dry_run_counts_outreach_not_just_replies(db):
+    """
+    reply_count on the Insights row would say 1 here. The delete takes 2.
+    """
+    rid = db.upsert_recruiter("email", "one@a.com", name="One")
+    db.record_recruiter_message(rid, "inbound", "2026-08-20", message_id="M1")
+    db.record_recruiter_message(rid, "reply", "2026-08-21", message_id="M2")
+
+    listed = next(r for r in db.get_recruiters() if r["id"] == rid)
+    assert listed["reply_count"] == 1
+    assert db.delete_recruiter(rid, dry_run=True)["messages"] == 2

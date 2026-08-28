@@ -1872,7 +1872,7 @@ def update_recruiter(recruiter_id: int, name: Optional[str] = None,
         conn.close()
 
 
-def delete_recruiter(recruiter_id: int) -> dict:
+def delete_recruiter(recruiter_id: int, dry_run: bool = False) -> dict:
     """
     Deletes a recruiter with its job links and its recorded messages.
 
@@ -1885,6 +1885,14 @@ def delete_recruiter(recruiter_id: int) -> dict:
     later run can reconstruct the record faithfully.
 
     Returns the counts so the caller can say what it is about to destroy.
+
+    dry_run counts and stops. The confirm dialog needs both numbers *before*
+    anything goes, and it cannot get the message count anywhere else: the one
+    the Insights page already has is reply_count, which filters
+    direction = 'reply' and so omits every outreach message this would delete.
+    Naming a number lower than the truth is the specific failure a confirm on an
+    unrecoverable delete exists to prevent, so the count comes from the same
+    query the delete itself uses.
     """
     conn = _connect(create=True)
     try:
@@ -1903,6 +1911,10 @@ def delete_recruiter(recruiter_id: int) -> dict:
             "SELECT COUNT(*) AS n FROM recruiter_messages WHERE recruiter_id = ?",
             (recruiter_id,),
         ).fetchone()["n"]
+
+        if dry_run:
+            return {"ok": True, "dry_run": True, "name": row["name"],
+                    "agency": row["agency"], "jobs": jobs_n, "messages": msgs_n}
 
         conn.execute("DELETE FROM recruiter_messages WHERE recruiter_id = ?",
                      (recruiter_id,))
