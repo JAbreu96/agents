@@ -1739,8 +1739,9 @@ def set_job_recruiter(company: str, date_added: str, position_title: str,
     what happened. A link with no message_id was made by hand and is replaced
     freely.
 
-    Returns {"ok": bool, "removed": int, "linked": int|None, "blocked": [...]}
-    where `blocked` lists the triage links that stopped the write.
+    Returns {"ok": bool, "removed": int, "linked": int|None, "current": dict|None,
+    "blocked": [...]} where `blocked` lists the triage links that stopped the
+    write and `current` is the link the job carries afterwards.
     """
     key = (company, date_added, position_title, link)
 
@@ -1762,6 +1763,7 @@ def set_job_recruiter(company: str, date_added: str, position_title: str,
             "ok": False,
             "removed": 0,
             "linked": None,
+            "current": existing[0] if existing else None,
             "blocked": [
                 {
                     "recruiter_id": e["recruiter_id"],
@@ -1794,7 +1796,12 @@ def set_job_recruiter(company: str, date_added: str, position_title: str,
     if protected and override:
         _note_recruiter_override(protected, key, recruiter_id)
 
-    return {"ok": True, "removed": removed, "linked": linked, "blocked": []}
+    # `current` is what the job points at now. Returned rather than left for the
+    # caller to look up, because this function has just decided it -- and the
+    # caller asking again is a second read of a row it already owns.
+    now = job_recruiter_links(*key)
+    return {"ok": True, "removed": removed, "linked": linked, "blocked": [],
+            "current": now[0] if now else None}
 
 
 def _note_recruiter_override(protected: list[dict], key: tuple,

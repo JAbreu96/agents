@@ -288,21 +288,35 @@ const JobFields = (function () {
    * write is an expected answer here: it means the link belongs to a message
    * and the caller should offer an override.
    */
-  async function saveJobRecruiter(job, recruiterId, override) {
-    const res = await fetch('/api/jobs/recruiter', {
+  /*
+   * POST JSON and read the body back, whether or not the request succeeded --
+   * the error routes here answer with a JSON body worth showing.
+   *
+   * It reports rather than alerts, because one caller's failure is an expected
+   * answer: /api/jobs/recruiter returns 409 to say the link belongs to a
+   * message, which the UI turns into an override prompt, not an error box.
+   */
+  async function postJSON(url, body) {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        company: job.company,
-        date_added: job.date_added,
-        position_title: job.position_title,
-        link: job.link,
-        recruiter_id: recruiterId,
-        override: !!override,
-      }),
+      body: JSON.stringify(body),
     });
     let data = {};
     try { data = await res.json(); } catch (e) { /* no body */ }
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  async function saveJobRecruiter(job, recruiterId, override) {
+    const res = await postJSON('/api/jobs/recruiter', {
+      company: job.company,
+      date_added: job.date_added,
+      position_title: job.position_title,
+      link: job.link,
+      recruiter_id: recruiterId,
+      override: !!override,
+    });
+    const data = res.data;
     if (res.ok) {
       const r = data.recruiter;
       job.recruiter_id = r ? r.recruiter_id : null;
@@ -319,19 +333,13 @@ const JobFields = (function () {
   }
 
   async function createRecruiter(fields) {
-    const res = await fetch('/api/recruiters/add', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(fields),
-    });
-    let data = {};
-    try { data = await res.json(); } catch (e) { /* no body */ }
+    const res = await postJSON('/api/recruiters/add', fields);
     if (!res.ok) {
-      alert(data.error || 'Failed to create the recruiter.');
+      alert(res.data.error || 'Failed to create the recruiter.');
       return null;
     }
     await loadRecruiters(true);
-    return data.recruiter;
+    return res.data.recruiter;
   }
 
   // --- Builder factory -----------------------------------------------------
@@ -363,6 +371,13 @@ const JobFields = (function () {
     function guard(el) {
       if (cfg.stopClicks) el.addEventListener('click', (e) => e.stopPropagation());
       return el;
+    }
+
+    // The in-handler counterpart to guard(). guard() attaches its own listener
+    // for elements that have none; this is for the ones that already do, where
+    // an extra listener would be a second answer to the same question.
+    function stop(e) {
+      if (cfg.stopClicks) e.stopPropagation();
     }
 
     function tag(el, field) {
@@ -412,7 +427,7 @@ const JobFields = (function () {
         btn.type = 'button';
         btn.textContent = 'Replace with date';
         btn.addEventListener('click', (e) => {
-          if (cfg.stopClicks) e.stopPropagation();
+          stop(e);
           const input = document.createElement('input');
           input.type = 'date';
           input.dataset.field = field;
@@ -462,7 +477,7 @@ const JobFields = (function () {
         removeBtn.type = 'button';
         removeBtn.innerHTML = '&times;';
         removeBtn.addEventListener('click', (e) => {
-          if (cfg.stopClicks) e.stopPropagation();
+          stop(e);
           const updated = tokens.filter(t => t !== token);
           saveField(job, field, serializeFollowupLog(updated), chip).then(() => {
             box.replaceWith(renderFollowupField(job, field));
@@ -485,7 +500,7 @@ const JobFields = (function () {
       // Two follow-ups is the cap; a third reads as pestering.
       addBtn.disabled = tokens.length >= 2;
       addBtn.addEventListener('click', (e) => {
-        if (cfg.stopClicks) e.stopPropagation();
+        stop(e);
         if (!dateInput.value || tokens.includes(dateInput.value)) return;
         const updated = [...tokens, dateInput.value];
         saveField(job, field, serializeFollowupLog(updated), addWrap).then(() => {
@@ -550,7 +565,7 @@ const JobFields = (function () {
       expandBtn.textContent = 'Show more';
       expandBtn.style.display = 'none';
       expandBtn.addEventListener('click', (e) => {
-        if (cfg.stopClicks) e.stopPropagation();
+        stop(e);
         const expanded = rendered.classList.toggle('expanded');
         expandBtn.textContent = expanded ? 'Show less' : 'Show more';
       });
@@ -559,7 +574,7 @@ const JobFields = (function () {
       wrap._checkOverflow = () => checkMarkdownOverflow(rendered, expandBtn);
 
       editBtn.addEventListener('click', (e) => {
-        if (cfg.stopClicks) e.stopPropagation();
+        stop(e);
         const textarea = document.createElement('textarea');
         textarea.className = 'editable markdown-raw';
         textarea.value = job[field] || '';
@@ -639,7 +654,7 @@ const JobFields = (function () {
         override.className = 'linklike';
         override.textContent = 'Change anyway';
         override.addEventListener('click', (e) => {
-          if (cfg.stopClicks) e.stopPropagation();
+          stop(e);
           if (!confirm(
             'This link came from an email inbox-triage processed. Changing it '
             + 'means the next run will not put it back, and the reason is noted '
@@ -716,7 +731,7 @@ const JobFields = (function () {
         save.type = 'button';
         save.textContent = 'Add & assign';
         save.addEventListener('click', async (e) => {
-          if (cfg.stopClicks) e.stopPropagation();
+          stop(e);
           if (!nameEl.value.trim() || !emailEl.value.trim()) {
             alert('A name and an email address are both required.');
             return;
@@ -740,7 +755,7 @@ const JobFields = (function () {
         cancel.className = 'linklike';
         cancel.textContent = 'Cancel';
         cancel.addEventListener('click', (e) => {
-          if (cfg.stopClicks) e.stopPropagation();
+          stop(e);
           redraw();
         });
 
@@ -844,7 +859,7 @@ const JobFields = (function () {
       err.className = 'interview-error';
 
       btn.addEventListener('click', async (e) => {
-        if (cfg.stopClicks) e.stopPropagation();
+        stop(e);
         err.textContent = '';
         const body = Object.assign(jobKeyFields(job), {
           interview_type: typeSel.value,
@@ -915,7 +930,7 @@ const JobFields = (function () {
         del.className = 'linklike';
         del.textContent = 'remove';
         del.addEventListener('click', async (e) => {
-          if (cfg.stopClicks) e.stopPropagation();
+          stop(e);
           await fetch('/api/interviews/delete', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -937,7 +952,7 @@ const JobFields = (function () {
       btn.className = 'delete-job-btn';
       btn.textContent = 'Delete Job';
       btn.addEventListener('click', (e) => {
-        if (cfg.stopClicks) e.stopPropagation();
+        stop(e);
         deleteJob(job, cfg.onDeleted);
       });
       wrap.appendChild(btn);
@@ -973,6 +988,7 @@ const JobFields = (function () {
     refreshMarkdownFields,
     saveField,
     deleteJob,
+    postJSON,
     loadRecruiters,
     recruiterBadge,
     recruiterLabel,

@@ -515,7 +515,7 @@ def api_add_recruiter():
 
 @app.route("/api/recruiters/update", methods=["POST"])
 def api_update_recruiter():
-    name, agency, email, notes, payload = _recruiter_payload()
+    payload = request.get_json(force=True) or {}
     recruiter_id = _recruiter_id(payload)
     if recruiter_id is None:
         return jsonify({"error": "recruiter_id is required"}), 400
@@ -608,11 +608,10 @@ def api_set_job_recruiter():
             "blocked": res["blocked"],
         }), 409
 
-    current = job_recruiter_links(**key)
     return jsonify({
         "ok": True,
         "removed": res["removed"],
-        "recruiter": current[0] if current else None,
+        "recruiter": res["current"],
     })
 
 
