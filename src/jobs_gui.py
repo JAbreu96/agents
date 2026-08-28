@@ -599,6 +599,9 @@ def api_set_job_recruiter():
         override=bool(payload.get("override")),
     )
     if not res["ok"]:
+        # An unknown recruiter is the caller's mistake; a triage link is not.
+        if res.get("error"):
+            return jsonify({"error": res["error"]}), 404
         return jsonify({
             "error": "This job was linked by inbox-triage from a message. "
                      "Overriding it means the next run will not restore it.",

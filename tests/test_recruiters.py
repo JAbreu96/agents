@@ -728,3 +728,38 @@ def test_unlink_is_idempotent(db):
 
     assert db.unlink_recruiter_job(rid, **key) == 1
     assert db.unlink_recruiter_job(rid, **key) == 0
+
+
+def test_assigning_an_unknown_recruiter_is_refused(db):
+    """
+    There is no foreign key -- the job key is copied, not referenced -- so
+    nothing else catches an id that does not exist. Unchecked, it writes a
+    recruiter_jobs row that never renders, because job_recruiter_links joins
+    recruiters.
+    """
+    key = _job(db, "Acme", "Platform Engineer", "https://acme.test/jobs/1")
+    res = db.set_job_recruiter(**key, recruiter_id=9999)
+
+    assert res["ok"] is False
+    assert "9999" in res["error"]
+    assert db.job_recruiter_links(**key) == []
+
+
+def test_an_orphan_link_cannot_be_inherited_by_the_next_recruiter(db):
+    """
+    Why the check is worth its three lines. SQLite hands a deleted INTEGER
+    PRIMARY KEY straight back to the next insert, so an orphan left by a bad
+    assignment attaches itself to whoever is created next -- reporting a role
+    they never pitched.
+    """
+    key = _job(db, "Acme", "Platform Engineer", "https://acme.test/jobs/1")
+    doomed = db.upsert_recruiter("email", "gone@a.com", name="Gone")
+    db.delete_recruiter(doomed)
+
+    # The id is now free. Assigning it must fail rather than leave a link
+    # for the next recruiter to inherit.
+    assert db.set_job_recruiter(**key, recruiter_id=doomed)["ok"] is False
+
+    reused = db.upsert_recruiter("email", "next@a.com", name="Next")
+    assert reused == doomed          # SQLite really does hand the id back
+    assert db.get_recruiter_jobs(reused) == []

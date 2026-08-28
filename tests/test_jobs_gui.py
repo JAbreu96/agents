@@ -308,3 +308,12 @@ def test_clearing_a_job_recruiter_is_still_allowed(client):
                       json={**_keys(client), "recruiter_id": None})
     assert res.status_code == 200
     assert res.get_json()["recruiter"] is None
+
+
+def test_assigning_an_unknown_recruiter_is_404_not_a_silent_success(client):
+    res = client.post("/api/jobs/recruiter",
+                      json={**_keys(client), "recruiter_id": 9999})
+    assert res.status_code == 404
+    job = next(j for j in client.get("/api/jobs").get_json()
+               if j["company"] == _keys(client)["company"])
+    assert job["recruiter_id"] is None

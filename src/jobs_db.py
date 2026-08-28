@@ -1651,6 +1651,20 @@ def unlink_recruiter_job(recruiter_id: int, company: str, date_added: str,
         conn.close()
 
 
+def recruiter_exists(recruiter_id: int) -> bool:
+    """Whether a recruiter row with this id is present."""
+    conn = _connect()
+    if not conn:
+        return False
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM recruiters WHERE id = ?", (recruiter_id,)
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def job_recruiter_links(company: str, date_added: str, position_title: str,
                         link: str) -> list[dict]:
     """Every recruiter link on one job, newest first, with the recruiter joined in."""
@@ -1729,6 +1743,17 @@ def set_job_recruiter(company: str, date_added: str, position_title: str,
     where `blocked` lists the triage links that stopped the write.
     """
     key = (company, date_added, position_title, link)
+
+    # There is no foreign key here on purpose -- the job key is copied rather
+    # than referenced -- which means nothing else will catch an id that does not
+    # exist. An unchecked one writes a recruiter_jobs row that never renders,
+    # because job_recruiter_links joins recruiters; and SQLite hands a deleted
+    # INTEGER PRIMARY KEY back to the next insert, so the next recruiter created
+    # inherits the orphan and reports a role it never pitched.
+    if recruiter_id is not None and not recruiter_exists(recruiter_id):
+        return {"ok": False, "removed": 0, "linked": None, "blocked": [],
+                "error": f"No recruiter with id {recruiter_id}."}
+
     existing = job_recruiter_links(*key)
 
     protected = [e for e in existing if (e.get("message_id") or "").strip()]
