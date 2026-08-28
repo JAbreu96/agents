@@ -1435,6 +1435,10 @@ _RECRUITER_MESSAGES_DDL = """
 RECRUITER_COLUMNS = [
     "source", "identity", "name", "agency", "email", "agency_domain",
     "first_seen", "last_seen", "role_count", "reply_count", "notes",
+    # Carried outward deliberately: a hand-entered recruiter is the one kind
+    # this export cannot reconstruct, since no message exists to re-derive them
+    # from. Losing the flag would also lose which names are human-owned.
+    "manual_entry",
 ]
 
 RECRUITER_JOB_COLUMNS = [
@@ -1463,6 +1467,16 @@ def _ensure_recruiters_schema(conn: sqlite3.Connection) -> None:
     conn.execute(_RECRUITERS_DDL)
     conn.execute(_RECRUITER_JOBS_DDL)
     conn.execute(_RECRUITER_MESSAGES_DDL)
+    # Marks a recruiter a human typed in, so upsert_recruiter can stop a later
+    # parse from overwriting the name and agency they entered. Added by ALTER
+    # rather than a table rebuild -- the rebuild dance in _migrate_key() exists
+    # to change a primary key, which this does not.
+    try:
+        conn.execute(
+            "ALTER TABLE recruiters ADD COLUMN manual_entry INTEGER NOT NULL DEFAULT 0"
+        )
+    except _SCHEMA_EXC:
+        pass  # column already exists
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_recruiter_jobs_job "
         "ON recruiter_jobs (company, date_added, position_title, link)"
@@ -1504,7 +1518,7 @@ def recruiter_link(source: str, identity: str, position_title: str) -> str:
 
 def upsert_recruiter(source: str, identity: str, name: str = "", agency: str = "",
                      email: str = "", agency_domain: str = "", notes: str = "",
-                     seen_date: str = "") -> int:
+                     seen_date: str = "", manual_entry: bool = False) -> int:
     """
     Creates or updates one recruiter, returning its id.
 
@@ -1514,6 +1528,23 @@ def upsert_recruiter(source: str, identity: str, name: str = "", agency: str = "
 
     Only ever widens what is known: a later message with no `agency` must not
     erase an agency learned earlier.
+
+    `manual_entry` marks a recruiter a human entered through the GUI, and on
+    those rows `name` and `agency` become theirs: filled if blank, never
+    replaced. Widening is not enough protection there, because a signature block
+    parsed down to "Jo" is a non-empty value and would otherwise overwrite a
+    hand-typed "Joanna Reyes". `email`, `agency_domain` and `last_seen` stay on
+    the widen-and-overwrite path -- those are machine facts, and discovering the
+    address of a recruiter entered by hand is the point.
+
+    The flag only ever turns on (MAX), so a human correcting an auto-created
+    recruiter keeps the protection from then on.
+
+    A hand-added recruiter is keyed source='email' with their address as the
+    identity, deliberately NOT a separate 'manual' source: UNIQUE(source,
+    identity) would make ('manual', addr) and ('email', addr) two rows for one
+    person, so keying on provenance is what would create the duplicate it looks
+    like it prevents.
     """
     if source not in RECRUITER_SOURCES:
         raise ValueError(
@@ -1535,24 +1566,32 @@ def upsert_recruiter(source: str, identity: str, name: str = "", agency: str = "
         if row:
             conn.execute(
                 "UPDATE recruiters SET "
-                "  name = COALESCE(NULLIF(?, ''), name), "
-                "  agency = COALESCE(NULLIF(?, ''), agency), "
+                # Human-owned on manual rows: fill a blank, never replace.
+                "  name = CASE WHEN manual_entry = 1 "
+                "              THEN COALESCE(NULLIF(name, ''), NULLIF(?, '')) "
+                "              ELSE COALESCE(NULLIF(?, ''), name) END, "
+                "  agency = CASE WHEN manual_entry = 1 "
+                "                THEN COALESCE(NULLIF(agency, ''), NULLIF(?, '')) "
+                "                ELSE COALESCE(NULLIF(?, ''), agency) END, "
                 "  email = COALESCE(NULLIF(?, ''), email), "
                 "  agency_domain = COALESCE(NULLIF(?, ''), agency_domain), "
                 "  notes = COALESCE(NULLIF(?, ''), notes), "
-                "  last_seen = MAX(COALESCE(last_seen, ''), ?) "
+                "  last_seen = MAX(COALESCE(last_seen, ''), ?), "
+                "  manual_entry = MAX(manual_entry, ?) "
                 "WHERE id = ?",
-                (name, agency, email, agency_domain, notes, seen, row["id"]),
+                (name, name, agency, agency, email, agency_domain, notes, seen,
+                 1 if manual_entry else 0, row["id"]),
             )
             conn.commit()
             return row["id"]
 
         cur = conn.execute(
             "INSERT INTO recruiters (source, identity, email, name, agency, "
-            "agency_domain, first_seen, last_seen, notes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "agency_domain, first_seen, last_seen, notes, manual_entry) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (source, identity, email or None, name or None, agency or None,
-             agency_domain or None, today, today, notes or None),
+             agency_domain or None, today, today, notes or None,
+             1 if manual_entry else 0),
         )
         conn.commit()
         return cur.lastrowid
@@ -1587,6 +1626,256 @@ def link_recruiter_job(recruiter_id: int, company: str, date_added: str,
             (recruiter_id, company, date_added, position_title, link),
         ).fetchone()
         return row["id"] if row else 0
+    finally:
+        conn.close()
+
+
+def unlink_recruiter_job(recruiter_id: int, company: str, date_added: str,
+                         position_title: str, link: str) -> int:
+    """
+    Removes one recruiter/job link. Returns how many rows went (0 or 1).
+
+    The counterpart link_recruiter_job never had, because until the GUI could
+    assign a recruiter nothing ever needed to take one back.
+    """
+    conn = _connect(create=True)
+    try:
+        cur = conn.execute(
+            "DELETE FROM recruiter_jobs WHERE recruiter_id = ? AND company = ? "
+            "AND date_added = ? AND position_title = ? AND link = ?",
+            (recruiter_id, company, date_added, position_title, link),
+        )
+        conn.commit()
+        return cur.rowcount or 0
+    finally:
+        conn.close()
+
+
+def job_recruiter_links(company: str, date_added: str, position_title: str,
+                        link: str) -> list[dict]:
+    """Every recruiter link on one job, newest first, with the recruiter joined in."""
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT rj.*, r.name AS recruiter_name, r.agency AS recruiter_agency, "
+            "       r.source AS recruiter_source, r.identity AS recruiter_identity, "
+            "       r.email AS recruiter_email, r.manual_entry AS recruiter_manual "
+            "FROM recruiter_jobs rj "
+            "JOIN recruiters r ON r.id = rj.recruiter_id "
+            "WHERE rj.company = ? AND rj.date_added = ? "
+            "  AND rj.position_title = ? AND rj.link = ? "
+            "ORDER BY rj.sourced_date DESC, rj.id DESC",
+            (company, date_added, position_title, link),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_job_recruiters() -> dict[tuple, dict]:
+    """
+    The recruiter to show against each job row, keyed by the composite job key.
+
+    Read whole rather than per row: the list view needs this for every job it
+    renders, and recruiter_jobs is a table of tens, not thousands -- one scan
+    beats a query per row by a wide margin at any size this reaches.
+
+    A job with more than one recruiter yields the most recent. The schema allows
+    several on purpose (an agency and an in-house recruiter can pitch the same
+    role, and at least one job here already has two), while the GUI assigns one,
+    so this collapses the difference rather than pretending it cannot happen.
+    """
+    conn = _connect()
+    if not conn:
+        return {}
+    try:
+        rows = conn.execute(
+            "SELECT rj.company, rj.date_added, rj.position_title, rj.link, "
+            "       rj.recruiter_id, rj.message_id, rj.sourced_date, "
+            "       r.name AS recruiter_name, r.agency AS recruiter_agency, "
+            "       r.identity AS recruiter_identity "
+            "FROM recruiter_jobs rj "
+            "JOIN recruiters r ON r.id = rj.recruiter_id "
+            "ORDER BY rj.sourced_date ASC, rj.id ASC"
+        ).fetchall()
+        # Ascending, so a later row overwrites an earlier one and the most
+        # recent link is what survives per key.
+        out: dict[tuple, dict] = {}
+        for r in rows:
+            d = dict(r)
+            key = (d["company"], d["date_added"], d["position_title"], d["link"])
+            out[key] = d
+        return out
+    finally:
+        conn.close()
+
+
+def set_job_recruiter(company: str, date_added: str, position_title: str,
+                      link: str, recruiter_id: Optional[int],
+                      override: bool = False, sourced_date: str = "") -> dict:
+    """
+    Points one job at one recruiter, or at none when recruiter_id is None.
+
+    Replacing a link that inbox-triage created is refused unless `override` is
+    passed. Such a link carries the message_id of the mail that produced it, and
+    triage is idempotent on that message: silently dropping the link means the
+    next run recreates it and the correction disappears with nothing to show
+    what happened. A link with no message_id was made by hand and is replaced
+    freely.
+
+    Returns {"ok": bool, "removed": int, "linked": int|None, "blocked": [...]}
+    where `blocked` lists the triage links that stopped the write.
+    """
+    key = (company, date_added, position_title, link)
+    existing = job_recruiter_links(*key)
+
+    protected = [e for e in existing if (e.get("message_id") or "").strip()]
+    if protected and not override:
+        return {
+            "ok": False,
+            "removed": 0,
+            "linked": None,
+            "blocked": [
+                {
+                    "recruiter_id": e["recruiter_id"],
+                    "recruiter_name": e.get("recruiter_name"),
+                    "message_id": e.get("message_id"),
+                    "account": e.get("account"),
+                    "sourced_date": e.get("sourced_date"),
+                }
+                for e in protected
+            ],
+        }
+
+    removed = 0
+    for e in existing:
+        if e["recruiter_id"] == recruiter_id:
+            continue  # already pointed here; leave its provenance alone
+        removed += unlink_recruiter_job(e["recruiter_id"], *key)
+
+    linked = None
+    if recruiter_id is not None:
+        already = any(e["recruiter_id"] == recruiter_id for e in existing)
+        if not already:
+            linked = link_recruiter_job(
+                recruiter_id, company, date_added, position_title, link,
+                sourced_date=sourced_date,
+            )
+        else:
+            linked = next(e["id"] for e in existing if e["recruiter_id"] == recruiter_id)
+
+    if protected and override:
+        _note_recruiter_override(protected, key, recruiter_id)
+
+    return {"ok": True, "removed": removed, "linked": linked, "blocked": []}
+
+
+def _note_recruiter_override(protected: list[dict], key: tuple,
+                             recruiter_id: Optional[int]) -> None:
+    """
+    Records on the displaced recruiter that a human overrode a triage link.
+
+    Without this the override leaves no trace anywhere, and the next time triage
+    fails to recreate the link nobody can tell whether that was intended.
+    """
+    stamp = date.today().isoformat()
+    company, date_added, position_title, _link = key
+    for e in protected:
+        note = (
+            f"{stamp}: link to {company} — {position_title or '(no title)'} "
+            f"({date_added}) replaced by hand"
+            + (f" with recruiter {recruiter_id}" if recruiter_id else " and cleared")
+            + f"; was from message {e.get('message_id')}."
+        )
+        conn = _connect(create=True)
+        try:
+            conn.execute(
+                "UPDATE recruiters SET notes = "
+                "  CASE WHEN notes IS NULL OR notes = '' THEN ? "
+                "       ELSE notes || char(10) || ? END "
+                "WHERE id = ?",
+                (note, note, e["recruiter_id"]),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def update_recruiter(recruiter_id: int, name: Optional[str] = None,
+                     agency: Optional[str] = None, email: Optional[str] = None,
+                     notes: Optional[str] = None) -> bool:
+    """
+    Edits a recruiter from the GUI. Only the fields passed are touched.
+
+    Unlike upsert_recruiter this overwrites, including with a blank -- a human
+    clearing a wrong agency means it, where a parser yielding nothing does not.
+    Editing marks the row manual_entry so the correction is protected from the
+    next parse.
+    """
+    sets, params = [], []
+    for col, val in (("name", name), ("agency", agency),
+                     ("email", email), ("notes", notes)):
+        if val is not None:
+            sets.append(f"{col} = ?")
+            params.append(val.strip() or None)
+    if not sets:
+        return False
+    sets.append("manual_entry = 1")
+    params.append(recruiter_id)
+
+    conn = _connect(create=True)
+    try:
+        cur = conn.execute(
+            f"UPDATE recruiters SET {', '.join(sets)} WHERE id = ?", params
+        )
+        conn.commit()
+        return (cur.rowcount or 0) > 0
+    finally:
+        conn.close()
+
+
+def delete_recruiter(recruiter_id: int) -> dict:
+    """
+    Deletes a recruiter with its job links and its recorded messages.
+
+    The messages go too, and that is the only safe option rather than an
+    oversight. recruiter_messages is UNIQUE(account, message_id) written with
+    INSERT OR IGNORE, so messages left behind keep a recruiter_id pointing at
+    nothing; when triage next reads the same mail it recreates the recruiter
+    under a new id and every one of those inserts is ignored as a duplicate. The
+    rebuilt recruiter would show zero messages, permanently. Taking them means a
+    later run can reconstruct the record faithfully.
+
+    Returns the counts so the caller can say what it is about to destroy.
+    """
+    conn = _connect(create=True)
+    try:
+        row = conn.execute(
+            "SELECT name, agency FROM recruiters WHERE id = ?", (recruiter_id,)
+        ).fetchone()
+        if not row:
+            return {"ok": False, "error": "No such recruiter.",
+                    "jobs": 0, "messages": 0}
+
+        jobs_n = conn.execute(
+            "SELECT COUNT(*) AS n FROM recruiter_jobs WHERE recruiter_id = ?",
+            (recruiter_id,),
+        ).fetchone()["n"]
+        msgs_n = conn.execute(
+            "SELECT COUNT(*) AS n FROM recruiter_messages WHERE recruiter_id = ?",
+            (recruiter_id,),
+        ).fetchone()["n"]
+
+        conn.execute("DELETE FROM recruiter_messages WHERE recruiter_id = ?",
+                     (recruiter_id,))
+        conn.execute("DELETE FROM recruiter_jobs WHERE recruiter_id = ?",
+                     (recruiter_id,))
+        conn.execute("DELETE FROM recruiters WHERE id = ?", (recruiter_id,))
+        conn.commit()
+        return {"ok": True, "name": row["name"], "agency": row["agency"],
+                "jobs": jobs_n, "messages": msgs_n}
     finally:
         conn.close()
 
