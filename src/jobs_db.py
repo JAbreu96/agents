@@ -1053,6 +1053,45 @@ def get_interviews(company: str = "", date_added: str = "", position_title: str 
     finally:
         conn.close()
 
+def get_upcoming_interviews(company: str = "", date_added: str = "", position_title: str = "",
+                            link: str = "", include_past: bool = False) -> list[dict]:
+    """
+    Rounds that are booked and not yet held, soonest first. With no arguments,
+    returns every one of them; pass the full job key to scope to one posting.
+
+    "Booked and not yet held" is the pair of clauses below: a scheduled_date, and
+    no occurred_date. By default the date must also be today or later, so a
+    booking whose date has passed with nothing recorded against it does not come
+    back as though it were still ahead. Pass include_past=True to retrieve those
+    too -- they are the forgotten paperwork, and they still exist.
+
+    Dates are stored as ISO YYYY-MM-DD text, which orders and compares correctly
+    as a string. Today's date is bound as a parameter rather than asked of SQLite,
+    so a test that pins the clock still gets the answer it pinned.
+    """
+    conn = _connect()
+    if not conn:
+        return []
+    try:
+        clauses = ["COALESCE(scheduled_date, '') <> ''", "COALESCE(occurred_date, '') = ''"]
+        params: list = []
+        if not include_past:
+            clauses.append("scheduled_date >= ?")
+            params.append(date.today().isoformat())
+        if company:
+            clauses.append("LOWER(company) = LOWER(?)")
+            params.append(company)
+            for col, val in (("date_added", date_added), ("position_title", position_title),
+                             ("link", link)):
+                if val:
+                    clauses.append(f"{col} = ?")
+                    params.append(val)
+        query = ("SELECT * FROM interviews WHERE " + " AND ".join(clauses)
+                 + " ORDER BY scheduled_date ASC, id ASC")
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+    finally:
+        conn.close()
+
 
 def _unit_key(row: dict) -> tuple:
     """A loop is one unit; a standalone round is a unit of one."""
@@ -1923,38 +1962,24 @@ UPCOMING_WINDOW_DAYS = 14
 
 def upcoming_interviews(include_past: bool = False) -> list[dict]:
     """
-    Rounds that are booked but have not happened yet, soonest first.
+    get_upcoming_interviews() rows with `days_away` and `overdue` added, which is
+    what every display surface wants and what the Insights card is built on.
 
     This is what "in flight" means in ordinary speech, and until now it had
     nowhere to live: two real calls were sitting in free-text `notes` where no
     query could see them.
 
-    A scheduled round that is already in the past and still has no
-    `occurred_date` is either forgotten paperwork or a call that never happened.
-    `include_past=True` surfaces those, because silently hiding them is how the
-    interview log drifts out of sync with reality.
+    A scheduled round already in the past with no `occurred_date` is either
+    forgotten paperwork or a call that never happened. It is not shown by
+    default -- it is not upcoming -- but `include_past=True` still retrieves it,
+    marked `overdue`, so the log can be reconciled against reality.
     """
-    conn = _connect()
-    if not conn:
-        return []
-    try:
-        rows = conn.execute(
-            "SELECT * FROM interviews "
-            "WHERE COALESCE(scheduled_date, '') <> '' AND COALESCE(occurred_date, '') = '' "
-            "ORDER BY scheduled_date ASC, id ASC"
-        ).fetchall()
-    finally:
-        conn.close()
-
     today = date.today()
     out = []
-    for r in rows:
-        row = dict(r)
+    for row in get_upcoming_interviews(include_past=include_past):
         when = _parse_date(row["scheduled_date"])
         row["days_away"] = (when - today).days if when else None
         row["overdue"] = row["days_away"] is not None and row["days_away"] < 0
-        if row["overdue"] and not include_past:
-            continue
         out.append(row)
     return out
 

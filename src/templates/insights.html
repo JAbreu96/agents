@@ -135,11 +135,8 @@
       evidence a round took place — invites get cancelled — so none of these counts toward
       any rate until it is marked as held.
     </div>
-    {% set soon = upcoming | selectattr("overdue") | list
-                  + (upcoming | rejectattr("overdue")
-                              | selectattr("days_away", "le", upcoming_window) | list) %}
-    {% set later = upcoming | rejectattr("overdue")
-                            | rejectattr("days_away", "le", upcoming_window) | list %}
+    {% set soon = upcoming | selectattr("days_away", "le", upcoming_window) | list %}
+    {% set later = upcoming | rejectattr("days_away", "le", upcoming_window) | list %}
     {% if soon %}
     <table>
       <thead><tr><th>Company</th><th>Role</th><th>Type</th><th>Date</th><th class="num">When</th></tr></thead>
@@ -151,8 +148,7 @@
             <td>{{ (u.type_label or u.interview_type).replace("_", " ") }}</td>
             <td>{{ u.scheduled_date }}</td>
             <td class="num">
-              {% if u.overdue %}<span class="rate bad">{{ -u.days_away }}d overdue</span>
-              {% elif u.days_away == 0 %}today
+              {% if u.days_away == 0 %}today
               {% else %}in {{ u.days_away }}d{% endif %}
             </td>
           </tr>
@@ -165,11 +161,10 @@
     </p>
     {% endif %}
     <div class="note">
-      A booking whose date has passed with no outcome recorded shows as
-      <strong>overdue</strong> rather than disappearing — either it happened and was never
-      logged, or it never happened. Both are worth seeing; silently hiding it is how the
-      interview log drifts away from reality. The {{ upcoming_window }}-day window narrows
-      the table, never the truth: anything further out is counted on the line above.
+      The {{ upcoming_window }}-day window narrows the table, never the truth: anything
+      booked further out is counted on the line above. A booking whose date has passed
+      with no outcome recorded is not upcoming and is not listed here — it is still
+      retrievable from <code>/api/interviews/upcoming?include_past=1</code>.
     </div>
     {% elif later %}
     <p class="muted" style="font-size:13px;margin:0;">

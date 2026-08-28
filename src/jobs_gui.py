@@ -382,7 +382,7 @@ def insights_view():
         recruiter_roles=get_recruiter_jobs(),
         coverage=recruiter_coverage(),
         silence=job_silence_stats(),
-        upcoming=upcoming_interviews(include_past=True),
+        upcoming=upcoming_interviews(),
         upcoming_window=UPCOMING_WINDOW_DAYS,
         missing_rounds=jobs_missing_interview_rows(),
     )
