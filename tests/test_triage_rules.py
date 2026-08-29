@@ -14,6 +14,7 @@ from src.triage_rules import (
     detect_rejection,
     is_from_joel,
     normalize_subject,
+    strip_html,
     strip_quoted_chain,
     unescape_title,
 )
@@ -209,3 +210,186 @@ def test_a_soft_offer_still_counts_as_an_ask():
 
 def test_informational_updates_still_carry_no_ask():
     assert contains_ask("I will be sending the job details to you shortly.") is False
+
+
+# ---------------------------------------------------------------- stripping
+
+# Indeed's "you have a new message" wrapper, message 1a03eaa24c97c721. The raw
+# body is 55,491 characters; the words in it are the six lines this asserts on.
+# Reading it through the MCP server overflowed the tool-result cap onto disk and
+# cost ~14,000 tokens to learn that the message is behind a login.
+INDEED_WRAPPER = """<html><head><style>.x{{color:#00f}}</style></head><body>
+<div style="display:none">Log in to view and respond to the message{pad}</div>
+<table><tr><td><a href="https://click.appcast.io/{track}">View Message</a></td></tr>
+<tr><td>You&#39;ve received a new message from Ezekiel Himole</td></tr>
+<tr><td>Product Engineer | AI Startup</td></tr>
+<tr><td>Naijaluxemart</td></tr>
+<tr><td>San Francisco, CA 94114</td></tr>
+<tr><td>This message is nonrepliable. View this message and reply from your
+account to send a response.</td></tr></table>
+<script>ga('send','pageview');</script></body></html>""".format(
+    pad=" " * 400, track="q" * 400
+)
+
+
+def test_the_indeed_wrapper_reduces_to_its_six_real_lines():
+    out = strip_html(INDEED_WRAPPER)
+    assert len(out) < 300          # the real message: 55,491 -> 764
+    assert "<" not in out and "style" not in out
+    for line in (
+        "Ezekiel Himole",
+        "Product Engineer | AI Startup",
+        "Naijaluxemart",
+        "San Francisco, CA 94114",
+        "nonrepliable",
+    ):
+        assert line in out
+
+
+def test_figure_space_padding_does_not_survive():
+    """U+2007 is not matched by an ASCII whitespace class.
+
+    After tags, entities and zero-width characters were removed from the Indeed
+    message, 800 of the 1,038 remaining characters were still this one padding
+    character.
+    """
+    assert " " not in strip_html(INDEED_WRAPPER)
+
+
+def test_invisible_padding_characters_are_removed():
+    """U+034F is the one that got through the first attempt.
+
+    It is a combining grapheme joiner, not whitespace, so `\\s` never touches it
+    and it survives every other pass unnoticed.
+    """
+    padded = (
+        "<p>Unfortunately͏ we are​ not­ moving‌ forward"
+        "⁠.</p>"
+    )
+    out = strip_html(padded)
+    assert out == "Unfortunately we are not moving forward."
+
+
+def test_a_rejection_still_fires_after_stripping():
+    """The whole point: the predicates must work on the stripped text.
+
+    A Workday rejection arrives as HTML with the sentence split across tags. If
+    stripping joined the fragments without a separator, or left markup between
+    them, `detect_rejection` would silently stop matching.
+    """
+    workday = (
+        "<html><body><table><tr><td><p>Dear Joel,</p>"
+        "<p>Thank you for your interest in the Product Engineer 3 role.</p>"
+        "<p>Unfortunately, we have decided to move forward with other "
+        "candidates whose qualifications more closely match our needs.</p>"
+        "</td></tr></table></body></html>"
+    )
+    found = detect_rejection(strip_html(workday))
+    assert found is not None
+    assert "other candidates" in found.sentence
+
+
+def test_a_long_tracking_url_is_replaced_not_kept():
+    body = "See the posting here: https://click.appcast.io/" + "a" * 300
+    out = strip_html(body)
+    assert "[long-url]" in out
+    assert "aaaa" not in out
+
+
+def test_a_real_posting_url_is_short_enough_to_survive():
+    body = "Apply at https://boards.greenhouse.io/optoinvest/jobs/4512289005"
+    assert "greenhouse.io/optoinvest" in strip_html(body)
+
+
+def test_plain_text_mail_passes_through_undamaged():
+    """The tag pass must be a no-op on text that has no tags.
+
+    LinkedIn's hit-reply relay sends plain text, and it carries the live
+    conversation -- damaging it would be worse than not stripping at all.
+    """
+    inmail = (
+        "Hi Joel,\n\n"
+        "I came across your profile and thought you'd be a great fit for a "
+        "Senior Frontend Engineer role we're hiring for.\n\n"
+        "Would you be open to a quick chat this week?\n\n"
+        "Best,\nJack Dahler"
+    )
+    out = strip_html(inmail)
+    assert "Jack Dahler" in out
+    assert "Would you be open to a quick chat this week?" in out
+    assert contains_ask(out) is True
+
+
+def test_stripping_leaves_the_quote_marker_intact():
+    """`strip_html` runs before `strip_quoted_chain`, so it must not eat the
+    marker the second one cuts on."""
+    threaded = (
+        "<p>Thanks Joel, that works.</p>"
+        "<p>On Thu, Aug 20, 2026 at 2:13 PM Joel Christ Abreu wrote:</p>"
+        "<blockquote>Unfortunately I am not moving forward.</blockquote>"
+    )
+    own = strip_quoted_chain(strip_html(threaded))
+    assert own == "Thanks Joel, that works."
+    assert detect_rejection(strip_html(threaded)) is None
+
+
+def test_an_empty_body_is_not_an_error():
+    assert strip_html("") == ""
+    assert strip_html(None) == ""
+
+
+# ------------------------------------------------- rejections the label found
+
+# Simplify's browser extension labels these `simplify/rejected`. All six are
+# genuine rejections that `detect_rejection` read as neutral -- found by
+# checking 15 labelled messages against the predicate, which agreed on 9.
+# The label was right every time; the phrase list was the thing that was short.
+
+def test_a_curly_apostrophe_does_not_hide_a_rejection():
+    """Thrivent, 27 Aug 2026. Mail clients autocorrect to U+2019, and every
+    phrase in the list is written with a straight apostrophe."""
+    assert detect_rejection(
+        "After evaluating the information provided against the requirements "
+        "of the role, we won’t be moving forward with your application "
+        "at this time."
+    ) is not None
+
+
+def test_a_different_candidate_is_still_a_rejection():
+    """Intel, 27 Aug 2026. The list had 'other candidate' and 'another
+    candidate' but not this third way of saying it."""
+    assert detect_rejection(
+        "There were several applications submitted for this position, and "
+        "after careful review, unfortunately, we have decided to pursue a "
+        "different candidate whose experience more closely meets our needs."
+    ) is not None
+
+
+def test_will_not_be_moving_forward_is_a_rejection():
+    """Runlayer, 26 Aug 2026. 'not be moving forward' -- the list had
+    'not moving forward' and 'not be moving ahead', and missed the pairing."""
+    assert detect_rejection(
+        "After reviewing your application we've determined that there isn't "
+        "an ideal fit at this time, and we will not be moving forward with "
+        "your candidacy."
+    ) is not None
+
+
+def test_a_work_authorisation_screen_out_is_a_rejection():
+    """American Iron and Metal, 26 Aug 2026. No standard rejection language at
+    all -- the reason replaces it."""
+    assert detect_rejection(
+        "Unfortunately, since you are not entitled to work in United States, "
+        "we are unable to consider your application."
+    ) is not None
+
+
+def test_moving_forward_positively_is_still_not_a_rejection():
+    """The guard on the above. 'be moving forward with your application' is
+    what an *advance* says, so the negation has to be part of the match."""
+    for body in (
+        "Great news -- we'll be moving forward with your application!",
+        "We are moving forward with your candidacy and would like to schedule "
+        "a technical interview.",
+    ):
+        assert detect_rejection(body) is None, body

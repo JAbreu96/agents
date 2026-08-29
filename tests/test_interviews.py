@@ -310,6 +310,38 @@ def test_marking_occurred_twice_is_refused(db):
     assert db.mark_interview_occurred(iid) is False
 
 
+def test_the_upcoming_query_runs_on_sqlite(db):
+    """
+    It once asked for GETDATE(), which is SQL Server and raises
+    `no such function` here. Calling it at all is the assertion.
+    """
+    key = _job(db, "Acme", "Phone Screen")
+    db.add_interview(interview_type="phone_screen", scheduled_date=_recent(-3), **key)
+    assert len(db.get_upcoming_interviews()) == 1
+
+
+def test_the_upcoming_query_keeps_today_and_drops_yesterday(db):
+    """A round booked for today has not happened yet; the cutoff is inclusive."""
+    today = _job(db, "Today", "Phone Screen", link="http://x/today")
+    past = _job(db, "Past", "Phone Screen", link="http://x/past")
+    db.add_interview(interview_type="phone_screen", scheduled_date=_recent(0), **today)
+    db.add_interview(interview_type="phone_screen", scheduled_date=_recent(1), **past)
+
+    assert [r["company"] for r in db.get_upcoming_interviews()] == ["Today"]
+    assert {r["company"] for r in db.get_upcoming_interviews(include_past=True)} == {
+        "Today", "Past"}
+
+
+def test_the_upcoming_query_filters_the_past_without_a_company(db):
+    """
+    The date clause used to sit inside `if company:`, so the unscoped call the
+    Insights card makes was filtered by nothing at all.
+    """
+    key = _job(db, "Acme", "Phone Screen")
+    db.add_interview(interview_type="phone_screen", scheduled_date=_recent(30), **key)
+    assert db.get_upcoming_interviews() == []
+
+
 def test_a_past_booking_never_marked_held_is_hidden_by_default(db):
     """
     Either forgotten paperwork or a call that never happened. Hidden from the

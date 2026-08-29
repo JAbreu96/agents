@@ -113,22 +113,20 @@ def _book(db, company, days_from_today, itype="recruiter_screen"):
 
 def _split(rows, window):
     """Mirrors the template's partition, so the rule is asserted in one place."""
-    soon = [r for r in rows if r["overdue"] or r["days_away"] <= window]
-    later = [r for r in rows if not r["overdue"] and r["days_away"] > window]
+    soon = [r for r in rows if r["days_away"] <= window]
+    later = [r for r in rows if r["days_away"] > window]
     return soon, later
 
 
 def test_a_booking_inside_the_window_is_in_the_table(db):
     _book(db, "Inside", 14)
-    soon, later = _split(jobs_db.upcoming_interviews(include_past=True),
-                         jobs_db.UPCOMING_WINDOW_DAYS)
+    soon, later = _split(jobs_db.upcoming_interviews(), jobs_db.UPCOMING_WINDOW_DAYS)
     assert [r["company"] for r in soon] == ["Inside"] and later == []
 
 
 def test_a_booking_past_the_window_moves_to_the_overflow(db):
     _book(db, "Later", 15)
-    soon, later = _split(jobs_db.upcoming_interviews(include_past=True),
-                         jobs_db.UPCOMING_WINDOW_DAYS)
+    soon, later = _split(jobs_db.upcoming_interviews(), jobs_db.UPCOMING_WINDOW_DAYS)
     assert soon == [] and [r["company"] for r in later] == ["Later"]
 
 
@@ -136,20 +134,19 @@ def test_nothing_is_dropped_by_the_window(db):
     """The window narrows the table, never the truth."""
     _book(db, "Soon", 3)
     _book(db, "Later", 40)
-    rows = jobs_db.upcoming_interviews(include_past=True)
+    rows = jobs_db.upcoming_interviews()
     soon, later = _split(rows, jobs_db.UPCOMING_WINDOW_DAYS)
     assert len(soon) + len(later) == len(rows) == 2
 
 
-def test_an_overdue_round_is_never_overflow_however_old(db):
+def test_a_past_booking_is_not_in_either_half(db):
     """
-    Overdue rows are the ones most likely to be something forgotten. Ageing them
-    into a collapsed count would remove the only place they surface.
+    A booking whose date has gone by is not upcoming, so it belongs to neither
+    the table nor the overflow count -- the card is about what is still ahead.
     """
     _book(db, "Forgotten", -90)
-    soon, later = _split(jobs_db.upcoming_interviews(include_past=True),
-                         jobs_db.UPCOMING_WINDOW_DAYS)
-    assert [r["company"] for r in soon] == ["Forgotten"] and later == []
+    soon, later = _split(jobs_db.upcoming_interviews(), jobs_db.UPCOMING_WINDOW_DAYS)
+    assert soon == [] and later == []
 
 
 # --- the template itself ----------------------------------------------------
@@ -201,6 +198,19 @@ def test_the_page_tables_a_booking_inside_the_window(db):
     _book(db, "Inside", 5)
     html = _render(db)
     assert "Inside" in html and "booked beyond" not in html
+
+
+def test_the_page_never_tables_a_past_booking(db):
+    """
+    The regression this file exists for: the card used to be handed
+    include_past=True and sorted past-dated rounds to the top of the table.
+    """
+    _book(db, "Forgotten", -90)
+    html = _render(db)
+    coming_up = html.split("Coming up")[1].split("source-bar")[0]
+    assert "Forgotten" not in coming_up
+    assert "overdue" not in coming_up
+    assert "Nothing booked." in coming_up
 
 
 def test_the_empty_state_stays_one_line(db):
