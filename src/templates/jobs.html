@@ -426,6 +426,10 @@
     {% endfor %}
     <option value="__blank__">(no status)</option>
   </select>
+  <select id="recruiterFilter" title="Filter by the recruiter a job came through">
+    <option value="">All recruiters</option>
+    <option value="__blank__">(no recruiter)</option>
+  </select>
   <div class="date-filter">
     <input type="date" id="dateFrom" title="Added from">
     <span>–</span>
@@ -548,12 +552,49 @@ const {
   },
 });
 
+/*
+ * The recruiter options, built from the jobs on the page.
+ *
+ * Deliberately not the full recruiter list: filtering by someone with no jobs
+ * in view can only ever return nothing, and the list runs to fifty. Rebuilt on
+ * each load, and it preserves the current selection so a reload does not
+ * silently widen the filter.
+ */
+function populateRecruiterFilter() {
+  const sel = document.getElementById('recruiterFilter');
+  const previous = sel.value;
+  // Labelled by name and agency together, via the same helper the pill's
+  // tooltip uses. Agency alone collides -- two AceStack recruiters would give
+  // two options reading "AceStack LLC" with no way to tell them apart.
+  const seen = new Map();
+  for (const j of allJobs) {
+    if (j.recruiter_id && !seen.has(j.recruiter_id)) {
+      seen.set(j.recruiter_id, JobFields.recruiterLabel(j) || 'Recruiter');
+    }
+  }
+  const options = [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+
+  sel.innerHTML = '';
+  for (const [value, label] of [['', 'All recruiters'], ['__blank__', '(no recruiter)']]) {
+    const o = document.createElement('option');
+    o.value = value; o.textContent = label;
+    sel.appendChild(o);
+  }
+  for (const [id, label] of options) {
+    const o = document.createElement('option');
+    o.value = String(id); o.textContent = label;
+    sel.appendChild(o);
+  }
+  sel.value = [...sel.options].some(o => o.value === previous) ? previous : '';
+}
+
 async function loadJobs() {
   // Arriving from the Insights funnel means matching the population it counted,
   // archived rows included; otherwise this stays the working table.
   const fromFunnel = new URLSearchParams(window.location.search).has('stage');
   const res = await fetch('/api/jobs' + (fromFunnel ? '?include_archived=1' : ''));
   allJobs = await res.json();
+  populateRecruiterFilter();
   render();
 }
 
@@ -569,12 +610,16 @@ function updateGoalBadge() {
 function render() {
   const q = document.getElementById('search').value.trim().toLowerCase();
   const statusFilter = document.getElementById('statusFilter').value;
+  const recruiterFilter = document.getElementById('recruiterFilter').value;
   const dateFrom = document.getElementById('dateFrom').value;
   const dateTo = document.getElementById('dateTo').value;
 
   const filtered = allJobs.filter(j => {
     if (statusFilter === '__blank__' && (j.status || '').trim() !== '') return false;
     if (statusFilter && statusFilter !== '__blank__' && j.status !== statusFilter) return false;
+    if (recruiterFilter === '__blank__' && j.recruiter_id) return false;
+    if (recruiterFilter && recruiterFilter !== '__blank__'
+        && String(j.recruiter_id) !== recruiterFilter) return false;
     if (!matchesFunnelFilter(j)) return false;
     if (dateFrom && (j.date_added || '') < dateFrom) return false;
     if (dateTo && (j.date_added || '') > dateTo) return false;
@@ -954,6 +999,7 @@ document.addEventListener('keydown', (e) => {
 
 document.getElementById('search').addEventListener('input', render);
 document.getElementById('statusFilter').addEventListener('change', render);
+document.getElementById('recruiterFilter').addEventListener('change', render);
 document.getElementById('dateFrom').addEventListener('change', render);
 document.getElementById('dateTo').addEventListener('change', render);
 document.getElementById('filterToday').addEventListener('click', () => {
