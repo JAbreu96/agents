@@ -107,6 +107,90 @@ def test_upsert_recruiter_is_idempotent_and_only_widens(db):
     assert row["agency"] == "Kastech SSG"
 
 
+def test_widening_still_overwrites_a_parsed_row(db):
+    """
+    The other half of "only widens": a non-empty value does replace.
+
+    Worth pinning, because the manual_entry rows below deliberately break this
+    rule and the difference between the two is the whole point.
+    """
+    rid = db.upsert_recruiter("email", "auto@x.com", name="Auto One")
+    db.upsert_recruiter("email", "auto@x.com", name="Auto Two")
+    assert db.get_recruiters()[0]["name"] == "Auto Two"
+    assert db.upsert_recruiter("email", "auto@x.com") == rid
+
+
+# --- recruiters entered by hand ---------------------------------------------
+# The GUI can create these; inbox-triage must not then undo them.
+
+def test_manual_name_and_agency_survive_a_later_parse(db):
+    """
+    A signature block parsed down to "Jo" must not replace a typed "Joanna
+    Reyes". Widening is not enough protection: "Jo" is non-empty and would win.
+    """
+    rid = db.upsert_recruiter("email", "jo@agency.com", name="Joanna Reyes",
+                              agency="Reyes Talent", manual_entry=True)
+    db.upsert_recruiter("email", "jo@agency.com", name="Jo", agency="Reyes")
+
+    row = db.get_recruiters()[0]
+    assert row["id"] == rid
+    assert row["name"] == "Joanna Reyes"
+    assert row["agency"] == "Reyes Talent"
+
+
+def test_manual_row_still_learns_machine_facts(db):
+    """Protection covers the human-owned fields only; discovery still works."""
+    # Both dates given explicitly: last_seen is a MAX, so letting either default
+    # to today makes the assertion depend on the day the suite runs.
+    db.upsert_recruiter("email", "jo@agency.com", name="Joanna Reyes",
+                        manual_entry=True, seen_date="2026-01-01")
+    db.upsert_recruiter("email", "jo@agency.com", agency_domain="agency.com",
+                        seen_date="2026-08-27")
+
+    row = db.get_recruiters()[0]
+    assert row["agency_domain"] == "agency.com"
+    assert row["last_seen"] == "2026-08-27"
+    assert row["name"] == "Joanna Reyes"
+
+
+def test_manual_entry_is_keyed_as_email_so_it_converges(db):
+    """
+    The reason there is no 'manual' source.
+
+    UNIQUE(source, identity) would make ('manual', addr) and ('email', addr) two
+    rows for one person, so keying on provenance would create exactly the
+    duplicate it looks like it prevents. Provenance is a flag instead.
+    """
+    typed = db.upsert_recruiter("email", "jo@agency.com", name="Joanna Reyes",
+                                manual_entry=True)
+    from_inbox = db.upsert_recruiter("email", "jo@agency.com",
+                                     seen_date="2026-08-27")
+    assert typed == from_inbox
+    assert len(db.get_recruiters()) == 1
+
+
+def test_manual_entry_only_ever_turns_on(db):
+    """A human correcting an auto-created recruiter keeps the protection."""
+    db.upsert_recruiter("email", "jo@agency.com", name="Parsed")
+    assert db.get_recruiters()[0]["manual_entry"] == 0
+
+    db.update_recruiter(db.get_recruiters()[0]["id"], name="Corrected")
+    assert db.get_recruiters()[0]["manual_entry"] == 1
+
+    db.upsert_recruiter("email", "jo@agency.com", name="Parsed Again")
+    row = db.get_recruiters()[0]
+    assert row["name"] == "Corrected"
+    assert row["manual_entry"] == 1
+
+
+def test_update_recruiter_can_clear_a_field(db):
+    """A human blanking a wrong agency means it; a parser yielding "" does not."""
+    rid = db.upsert_recruiter("email", "jo@agency.com", name="Jo",
+                              agency="Wrong Agency")
+    db.update_recruiter(rid, agency="")
+    assert db.get_recruiters()[0]["agency"] is None
+
+
 def test_two_recruiters_at_one_agency(db):
     """AceStack pitched twice under two different addresses."""
     db.upsert_recruiter("email", "gautamk@acestackllc.com", name="Gautam Kumar",
@@ -475,3 +559,207 @@ def test_coverage_reports_two_counts_and_no_ratio(db):
     assert cov["captured"] == 1
     assert cov["suspected_uncaptured"] == 1
     assert not any("rate" in k or "percent" in k for k in cov)
+
+
+# --- assigning a recruiter from the GUI -------------------------------------
+# Until the job row could assign one, nothing ever needed to take a link back,
+# so link_recruiter_job had no counterpart and these paths did not exist.
+
+def test_set_job_recruiter_assigns_reassigns_and_clears(db):
+    key = _job(db, "Acme", "Platform Engineer", "https://acme.test/jobs/1")
+    one = db.upsert_recruiter("email", "one@a.com", name="One", manual_entry=True)
+    two = db.upsert_recruiter("email", "two@b.com", name="Two", manual_entry=True)
+
+    assert db.job_recruiter_links(**key) == []
+
+    db.set_job_recruiter(**key, recruiter_id=one)
+    assert [l["recruiter_name"] for l in db.job_recruiter_links(**key)] == ["One"]
+
+    # Reassigning replaces rather than accumulating: the GUI shows one.
+    res = db.set_job_recruiter(**key, recruiter_id=two)
+    assert res["removed"] == 1
+    assert [l["recruiter_name"] for l in db.job_recruiter_links(**key)] == ["Two"]
+
+    res = db.set_job_recruiter(**key, recruiter_id=None)
+    assert res["removed"] == 1
+    assert db.job_recruiter_links(**key) == []
+
+
+def test_reassigning_the_same_recruiter_leaves_the_link_alone(db):
+    """
+    Idempotent, and specifically it does not delete-then-reinsert -- that would
+    throw away the sourced_date and message_id the existing row carries.
+    """
+    key = _job(db, "Acme", "Platform Engineer", "https://acme.test/jobs/1")
+    rid = db.upsert_recruiter("email", "one@a.com", name="One")
+    db.link_recruiter_job(rid, sourced_date="2026-08-01", **key)
+
+    res = db.set_job_recruiter(**key, recruiter_id=rid)
+    assert res["removed"] == 0
+    assert db.job_recruiter_links(**key)[0]["sourced_date"] == "2026-08-01"
+
+
+def test_a_triage_link_is_not_replaced_silently(db):
+    """
+    The link carries the message_id of the mail that made it, and triage is
+    idempotent on that message. Dropping it silently means the next run
+    recreates it and the correction vanishes with nothing to show why.
+    """
+    key = _job(db, "Acme", "Platform Engineer", "https://acme.test/jobs/1")
+    triage = db.upsert_recruiter("linkedin", "triage-person", name="Triage Person")
+    db.link_recruiter_job(triage, sourced_date="2026-08-20", account="alt",
+                          message_id="MSG-ABC-123", **key)
+    other = db.upsert_recruiter("email", "one@a.com", name="One", manual_entry=True)
+
+    res = db.set_job_recruiter(**key, recruiter_id=other)
+    assert res["ok"] is False
+    assert [b["message_id"] for b in res["blocked"]] == ["MSG-ABC-123"]
+    # And nothing moved.
+    assert [l["recruiter_name"] for l in db.job_recruiter_links(**key)] == ["Triage Person"]
+
+
+def test_override_replaces_a_triage_link_and_records_why(db):
+    key = _job(db, "Acme", "Platform Engineer", "https://acme.test/jobs/1")
+    triage = db.upsert_recruiter("linkedin", "triage-person", name="Triage Person")
+    db.link_recruiter_job(triage, sourced_date="2026-08-20", account="alt",
+                          message_id="MSG-ABC-123", **key)
+    other = db.upsert_recruiter("email", "one@a.com", name="One", manual_entry=True)
+
+    res = db.set_job_recruiter(**key, recruiter_id=other, override=True)
+    assert res["ok"] is True
+    assert [l["recruiter_name"] for l in db.job_recruiter_links(**key)] == ["One"]
+
+    # The displaced recruiter carries the reason, so a link that fails to come
+    # back on the next triage run is explainable.
+    notes = next(r for r in db.get_recruiters() if r["id"] == triage)["notes"]
+    assert "MSG-ABC-123" in notes
+
+
+def test_get_job_recruiters_collapses_a_job_with_two_recruiters(db):
+    """
+    The schema allows several per job on purpose and at least one real row has
+    two. The GUI assigns one, so the map collapses to the most recent rather
+    than pretending the case cannot arise.
+    """
+    key = _job(db, "GTE", "Product Engineer", "https://gte.test/jobs/1")
+    early = db.upsert_recruiter("linkedin", "early-one", name="Early")
+    late = db.upsert_recruiter("linkedin", "late-one", name="Late")
+    db.link_recruiter_job(early, sourced_date="2026-08-01", **key)
+    db.link_recruiter_job(late, sourced_date="2026-08-20", **key)
+
+    assert len(db.job_recruiter_links(**key)) == 2
+    mapped = db.get_job_recruiters()
+    entry = mapped[(key["company"], key["date_added"],
+                    key["position_title"], key["link"])]
+    assert entry["recruiter_name"] == "Late"
+
+
+# --- deletion ---------------------------------------------------------------
+
+def test_delete_recruiter_reports_what_it_will_destroy(db):
+    key = _job(db, "Acme", "Platform Engineer", "https://acme.test/jobs/1")
+    rid = db.upsert_recruiter("email", "one@a.com", name="One")
+    db.link_recruiter_job(rid, sourced_date="2026-08-20", **key)
+    db.record_recruiter_message(rid, "inbound", "2026-08-20", message_id="M1")
+    db.record_recruiter_message(rid, "reply", "2026-08-21", message_id="M2")
+
+    res = db.delete_recruiter(rid)
+    assert (res["ok"], res["jobs"], res["messages"]) == (True, 1, 2)
+    assert db.get_recruiters() == []
+    assert db.get_recruiter_jobs(rid) == []
+    assert db.get_recruiter_messages(rid) == []
+
+
+def test_deleted_recruiter_can_be_rebuilt_from_the_same_mail(db):
+    """
+    Why the delete cascades to recruiter_messages.
+
+    Leaving the messages behind orphans them against a dead recruiter_id, and
+    because recruiter_messages is UNIQUE(account, message_id) written with
+    INSERT OR IGNORE, triage reading the same mail again inserts nothing. The
+    rebuilt recruiter would show zero messages, permanently.
+    """
+    rid = db.upsert_recruiter("email", "one@a.com", name="One")
+    db.record_recruiter_message(rid, "inbound", "2026-08-20", message_id="M1")
+    # A second recruiter so `rid` is not the highest id. SQLite hands a deleted
+    # INTEGER PRIMARY KEY straight back to the next insert when it was the max,
+    # which would let the rebuilt row re-adopt its own orphans and hide the bug
+    # this pair of tests is about.
+    db.upsert_recruiter("email", "keeper@b.com", name="Keeper")
+    db.delete_recruiter(rid)
+
+    rebuilt = db.upsert_recruiter("email", "one@a.com", name="One")
+    assert rebuilt != rid
+    db.record_recruiter_message(rebuilt, "inbound", "2026-08-20", message_id="M1")
+    assert len(db.get_recruiter_messages(rebuilt)) == 1
+
+
+def test_orphaned_messages_would_be_unrecoverable(db):
+    """
+    The counterfactual, pinned so nobody 'simplifies' the cascade away.
+
+    Deleting the recruiter without its messages loses them for good.
+    """
+    rid = db.upsert_recruiter("email", "one@a.com", name="One")
+    db.record_recruiter_message(rid, "inbound", "2026-08-20", message_id="M1")
+    db.upsert_recruiter("email", "keeper@b.com", name="Keeper")  # see above
+
+    conn = db._connect(create=True)
+    conn.execute("DELETE FROM recruiters WHERE id = ?", (rid,))
+    conn.commit()
+    conn.close()
+
+    rebuilt = db.upsert_recruiter("email", "one@a.com", name="One")
+    assert rebuilt != rid
+    db.record_recruiter_message(rebuilt, "inbound", "2026-08-20", message_id="M1")
+    assert db.get_recruiter_messages(rebuilt) == []  # silently lost
+
+
+def test_deleting_an_unknown_recruiter_is_reported_not_raised(db):
+    res = db.delete_recruiter(9999)
+    assert res["ok"] is False
+    assert res["jobs"] == 0 and res["messages"] == 0
+
+
+def test_unlink_is_idempotent(db):
+    key = _job(db, "Acme", "Platform Engineer", "https://acme.test/jobs/1")
+    rid = db.upsert_recruiter("email", "one@a.com", name="One")
+    db.link_recruiter_job(rid, sourced_date="2026-08-20", **key)
+
+    assert db.unlink_recruiter_job(rid, **key) == 1
+    assert db.unlink_recruiter_job(rid, **key) == 0
+
+
+def test_assigning_an_unknown_recruiter_is_refused(db):
+    """
+    There is no foreign key -- the job key is copied, not referenced -- so
+    nothing else catches an id that does not exist. Unchecked, it writes a
+    recruiter_jobs row that never renders, because job_recruiter_links joins
+    recruiters.
+    """
+    key = _job(db, "Acme", "Platform Engineer", "https://acme.test/jobs/1")
+    res = db.set_job_recruiter(**key, recruiter_id=9999)
+
+    assert res["ok"] is False
+    assert "9999" in res["error"]
+    assert db.job_recruiter_links(**key) == []
+
+
+def test_an_orphan_link_cannot_be_inherited_by_the_next_recruiter(db):
+    """
+    Why the check is worth its three lines. SQLite hands a deleted INTEGER
+    PRIMARY KEY straight back to the next insert, so an orphan left by a bad
+    assignment attaches itself to whoever is created next -- reporting a role
+    they never pitched.
+    """
+    key = _job(db, "Acme", "Platform Engineer", "https://acme.test/jobs/1")
+    doomed = db.upsert_recruiter("email", "gone@a.com", name="Gone")
+    db.delete_recruiter(doomed)
+
+    # The id is now free. Assigning it must fail rather than leave a link
+    # for the next recruiter to inherit.
+    assert db.set_job_recruiter(**key, recruiter_id=doomed)["ok"] is False
+
+    reused = db.upsert_recruiter("email", "next@a.com", name="Next")
+    assert reused == doomed          # SQLite really does hand the id back
+    assert db.get_recruiter_jobs(reused) == []

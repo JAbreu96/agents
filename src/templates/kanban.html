@@ -305,6 +305,48 @@
     align-items: center;
     gap: 6px;
   }
+  /* Interview rounds -- the modal had no counterpart to the table's field, so
+     rounds could only be logged from the table. Same rules, minus the grid
+     span: the modal is a single column. */
+  .interview-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+  .interview-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
+  }
+  .interview-empty { font-size: 13px; color: var(--muted); }
+  .interview-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .interview-form input, .interview-form select {
+    padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card); color: var(--text); font-size: 13px;
+  }
+  .interview-error { color: #d64545; font-size: 12px; margin-top: 6px; }
+
+  /* Recruiter, matching the table view's vocabulary. */
+  .recruiter-pill {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    background: var(--card);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 1px 8px;
+    margin-top: 2px;
+    font-size: 10px;
+    font-weight: 600;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .recruiter-pill.from-triage { border-style: dashed; }
+  .recruiter-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .recruiter-select { min-width: 240px; }
+  .recruiter-current { font-weight: 600; }
+  .recruiter-provenance { color: var(--muted); font-size: 12px; font-style: italic; }
+  .recruiter-new { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .recruiter-new input { padding: 4px 6px; }
+
   .followup-chip {
     display: inline-flex;
     align-items: center;
@@ -414,124 +456,50 @@
   <div class="modal-panel" id="modalPanel"></div>
 </div>
 
+<script src="{{ url_for('static', filename='job_fields.js') }}"></script>
 <script>
 const STATUS_VALUES = {{ status_values | tojson }};
+const INTERVIEW_TYPES = {{ interview_types|tojson }};
 // Blank status becomes its own "Not Tracked" column, placed first.
 const COLUMNS = ["", ...STATUS_VALUES.filter(s => s !== "")];
 const COLUMN_LABELS = { "": "Not Tracked" };
 
 let allJobs = [];
 
+// Shared with the table view -- see static/job_fields.js. These used to be a
+// second copy named buildModal*, which is how the board ended up without an
+// interviews field the table has had all along.
+const {
+  rowKey, localISODate, startOfWeekISO, isValidISODate,
+  parseFollowupLog, serializeFollowupLog,
+  renderMarkdownInto, appendInlineMarkdown,
+  checkMarkdownOverflow, refreshMarkdownFields, saveField, jobKeyFields,
+} = JobFields;
+
+const {
+  makeDateField, renderDateInput, makeFollowupField, renderFollowupField,
+  makeDetailField, makeMarkdownField, makeRecruiterField, makeInterviewsField,
+  makeDeleteField,
+} = JobFields.create({
+  fieldClass: 'modal-field',
+  notesClass: '',
+  // No ancestor click handler to defend against: the modal is not a table row.
+  stopClicks: false,
+  tagFields: true,
+  // A date edit can change which column a card belongs in, so redraw the board.
+  afterSave: () => render(),
+  interviewTypes: INTERVIEW_TYPES,
+  onDeleted: (job) => {
+    allJobs = allJobs.filter(j => rowKey(j) !== rowKey(job));
+    closeModal();
+    render();
+  },
+});
+
 async function loadJobs() {
   const res = await fetch('/api/jobs');
   allJobs = await res.json();
   render();
-}
-
-function rowKey(job) {
-  return `${job.company}::${job.date_added}::${job.position_title || ''}::${job.link || ''}`;
-}
-
-function localISODate(d) {
-  const yr = d.getFullYear();
-  const mo = String(d.getMonth() + 1).padStart(2, '0');
-  const da = String(d.getDate()).padStart(2, '0');
-  return `${yr}-${mo}-${da}`;
-}
-
-function startOfWeekISO(d) {
-  const copy = new Date(d);
-  copy.setDate(copy.getDate() - copy.getDay());
-  return localISODate(copy);
-}
-
-function renderMarkdownInto(container, raw) {
-  container.innerHTML = '';
-  const lines = (raw || '').split('\n');
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (/^\s*$/.test(line)) { i++; continue; }
-    const heading = /^#{1,6}\s+(.*)$/.exec(line);
-    if (heading) {
-      const h = document.createElement('h4');
-      appendInlineMarkdown(h, heading[1]);
-      container.appendChild(h);
-      i++;
-      continue;
-    }
-    if (/^[-*]\s+/.test(line)) {
-      const ul = document.createElement('ul');
-      while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
-        const li = document.createElement('li');
-        appendInlineMarkdown(li, lines[i].replace(/^[-*]\s+/, ''));
-        ul.appendChild(li);
-        i++;
-      }
-      container.appendChild(ul);
-      continue;
-    }
-    const para = document.createElement('p');
-    let first = true;
-    while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^[-*]\s+/.test(lines[i]) && !/^#{1,6}\s+/.test(lines[i])) {
-      if (!first) para.appendChild(document.createElement('br'));
-      appendInlineMarkdown(para, lines[i]);
-      first = false;
-      i++;
-    }
-    container.appendChild(para);
-  }
-  if (!container.childNodes.length) {
-    const empty = document.createElement('p');
-    empty.className = 'markdown-empty';
-    empty.textContent = '(empty)';
-    container.appendChild(empty);
-  }
-}
-
-function appendInlineMarkdown(parent, text) {
-  const tokenRe = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
-  let lastIndex = 0;
-  let m;
-  while ((m = tokenRe.exec(text)) !== null) {
-    if (m.index > lastIndex) parent.appendChild(document.createTextNode(text.slice(lastIndex, m.index)));
-    const token = m[0];
-    if (token.startsWith('**')) {
-      const strong = document.createElement('strong');
-      strong.textContent = token.slice(2, -2);
-      parent.appendChild(strong);
-    } else if (token.startsWith('`')) {
-      const code = document.createElement('code');
-      code.textContent = token.slice(1, -1);
-      parent.appendChild(code);
-    } else {
-      const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
-      if (linkMatch && /^https?:\/\//i.test(linkMatch[2])) {
-        const a = document.createElement('a');
-        a.href = linkMatch[2];
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        a.textContent = linkMatch[1];
-        parent.appendChild(a);
-      } else {
-        parent.appendChild(document.createTextNode(token));
-      }
-    }
-    lastIndex = tokenRe.lastIndex;
-  }
-  if (lastIndex < text.length) parent.appendChild(document.createTextNode(text.slice(lastIndex)));
-}
-
-function checkMarkdownOverflow(rendered, expandBtn) {
-  if (rendered.classList.contains('expanded')) { return; }
-  const overflowing = rendered.scrollHeight > rendered.clientHeight + 1;
-  expandBtn.style.display = overflowing ? 'inline-block' : 'none';
-}
-
-function refreshMarkdownFields(scope) {
-  scope.querySelectorAll('.markdown-field').forEach(el => {
-    if (typeof el._checkOverflow === 'function') el._checkOverflow();
-  });
 }
 
 function render() {
@@ -618,6 +586,9 @@ function makeCard(job) {
   title.textContent = job.position_title || '';
   card.appendChild(title);
 
+  const pill = JobFields.recruiterBadge(job);
+  if (pill) card.appendChild(pill);
+
   const meta = document.createElement('div');
   meta.className = 'meta';
   const loc = document.createElement('span');
@@ -657,24 +628,24 @@ async function openModal(job) {
   panel.innerHTML = '';
   backdrop.classList.remove('hidden');
 
-  if (typeof job.job_summary !== 'string') {
-    panel.textContent = 'Loading…';
-    try {
-      const params = new URLSearchParams({
-        company: job.company || '',
-        date_added: job.date_added || '',
-        position_title: job.position_title || '',
-        link: job.link || '',
-      });
-      const res = await fetch('/api/jobs/detail?' + params.toString());
-      const data = await res.json();
-      job.job_summary = data.job_summary || '';
-    } catch (err) {
-      job.job_summary = '';
-    }
-    if (backdrop.classList.contains('hidden')) return;  // closed while loading
-    panel.innerHTML = '';
+  // Always fetched, not only when the summary is missing: rounds have a second
+  // writer -- inbox-triage on a daily cron -- so they are re-read every open and
+  // never cached, while job_summary has one writer and is kept for the page.
+  panel.textContent = 'Loading…';
+  const haveSummary = typeof job.job_summary === 'string';
+  try {
+    const params = new URLSearchParams(jobKeyFields(job));
+    if (haveSummary) params.set('summary', '0');
+    const res = await fetch('/api/jobs/detail?' + params.toString());
+    const data = await res.json();
+    if (!haveSummary) job.job_summary = data.job_summary || '';
+    job._rounds = data.interviews || [];
+  } catch (err) {
+    if (!haveSummary) job.job_summary = '';
+    job._rounds = [];
   }
+  if (backdrop.classList.contains('hidden')) return;  // closed while loading
+  panel.innerHTML = '';
 
   panel.appendChild(buildModalContent(job));
   refreshMarkdownFields(panel);
@@ -748,157 +719,17 @@ function buildModalContent(job) {
   frag.appendChild(head);
 
   frag.appendChild(buildModalStatusField(job));
-  frag.appendChild(buildModalTextField('Contacts', job, 'contacts'));
-  frag.appendChild(buildModalDateField('Outreach Date', job, 'outreach_date'));
-  frag.appendChild(buildModalDateField('Date Applied', job, 'date_applied'));
-  frag.appendChild(buildModalFollowupField('Follow-up Log', job, 'followup_log'));
-  frag.appendChild(buildModalMarkdownField('Job Description', job, 'job_summary'));
-  frag.appendChild(buildModalMarkdownField('Notes', job, 'notes'));
-  frag.appendChild(buildDeleteField(job));
+  frag.appendChild(makeRecruiterField(job, () => render()));
+  frag.appendChild(makeDetailField('Contacts', job, 'contacts'));
+  frag.appendChild(makeDateField('Outreach Date', job, 'outreach_date'));
+  frag.appendChild(makeDateField('Date Applied', job, 'date_applied'));
+  frag.appendChild(makeFollowupField('Follow-up Log', job, 'followup_log'));
+  frag.appendChild(makeMarkdownField('Job Description', job, 'job_summary'));
+  frag.appendChild(makeMarkdownField('Notes', job, 'notes'));
+  frag.appendChild(makeInterviewsField(job, job._rounds || []));
+  frag.appendChild(makeDeleteField(job));
 
   return frag;
-}
-
-function buildDeleteField(job) {
-  const wrap = document.createElement('div');
-  wrap.className = 'modal-field';
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'delete-job-btn';
-  btn.textContent = 'Delete Job';
-  btn.addEventListener('click', () => deleteJob(job));
-  wrap.appendChild(btn);
-  return wrap;
-}
-
-function isValidISODate(str) {
-  if (!str) return false;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
-  return !isNaN(Date.parse(str));
-}
-
-function parseFollowupLog(raw) {
-  return (raw || '').split(',').map(s => s.trim()).filter(Boolean);
-}
-
-function serializeFollowupLog(tokens) {
-  return tokens.join(', ');
-}
-
-function buildModalDateField(label, job, field) {
-  const wrap = document.createElement('div');
-  wrap.className = 'modal-field';
-
-  const labelEl = document.createElement('label');
-  labelEl.textContent = label;
-  wrap.appendChild(labelEl);
-
-  wrap.appendChild(renderModalDateInput(job, field));
-
-  return wrap;
-}
-
-function renderModalDateInput(job, field) {
-  const value = job[field] || '';
-
-  if (value && !isValidISODate(value)) {
-    const box = document.createElement('div');
-    box.className = 'non-date-value';
-    const text = document.createElement('span');
-    text.className = 'raw-text';
-    text.textContent = value;
-    box.appendChild(text);
-
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = 'Replace with date';
-    btn.addEventListener('click', () => {
-      const input = document.createElement('input');
-      input.type = 'date';
-      input.dataset.field = field;
-      input.addEventListener('change', () => {
-        saveField(job, field, input.value, input).then(() => render());
-      });
-      box.replaceWith(input);
-    });
-    box.appendChild(btn);
-    return box;
-  }
-
-  const input = document.createElement('input');
-  input.type = 'date';
-  input.value = value;
-  input.dataset.field = field;
-  input.addEventListener('change', () => {
-    saveField(job, field, input.value, input).then(() => render());
-  });
-  return input;
-}
-
-function buildModalFollowupField(label, job, field) {
-  const wrap = document.createElement('div');
-  wrap.className = 'modal-field';
-
-  const labelEl = document.createElement('label');
-  labelEl.textContent = label;
-  wrap.appendChild(labelEl);
-
-  wrap.appendChild(renderModalFollowupField(job, field));
-
-  return wrap;
-}
-
-function renderModalFollowupField(job, field) {
-  const tokens = parseFollowupLog(job[field]);
-
-  const box = document.createElement('div');
-  box.className = 'followup-field';
-
-  for (const token of tokens) {
-    const chip = document.createElement('span');
-    chip.className = 'followup-chip' + (isValidISODate(token) ? '' : ' non-date');
-    const text = document.createElement('span');
-    text.textContent = token;
-    chip.appendChild(text);
-
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button';
-    removeBtn.innerHTML = '&times;';
-    removeBtn.addEventListener('click', () => {
-      const updated = tokens.filter(t => t !== token);
-      const value = serializeFollowupLog(updated);
-      saveField(job, field, value, chip).then(() => {
-        const fresh = renderModalFollowupField(job, field);
-        box.replaceWith(fresh);
-      });
-    });
-    chip.appendChild(removeBtn);
-    box.appendChild(chip);
-  }
-
-  const addWrap = document.createElement('span');
-  addWrap.className = 'followup-add';
-  const dateInput = document.createElement('input');
-  dateInput.type = 'date';
-  addWrap.appendChild(dateInput);
-
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.textContent = 'Add';
-  addBtn.disabled = tokens.length >= 2;
-  addBtn.addEventListener('click', () => {
-    if (!dateInput.value || tokens.includes(dateInput.value)) return;
-    const updated = [...tokens, dateInput.value];
-    const value = serializeFollowupLog(updated);
-    saveField(job, field, value, addWrap).then(() => {
-      const fresh = renderModalFollowupField(job, field);
-      box.replaceWith(fresh);
-    });
-  });
-  addWrap.appendChild(addBtn);
-  box.appendChild(addWrap);
-
-  return box;
 }
 
 function buildModalStatusField(job) {
@@ -926,146 +757,6 @@ function buildModalStatusField(job) {
   });
   wrap.appendChild(select);
   return wrap;
-}
-
-function buildModalTextField(label, job, field, isNotes) {
-  const wrap = document.createElement('div');
-  wrap.className = 'modal-field';
-
-  const labelEl = document.createElement('label');
-  labelEl.textContent = label;
-  wrap.appendChild(labelEl);
-
-  const editable = document.createElement('div');
-  editable.className = 'editable';
-  editable.dataset.field = field;
-  editable.contentEditable = 'true';
-  editable.textContent = job[field] || '';
-  editable.addEventListener('blur', () => {
-    const value = editable.textContent.trim();
-    if (value !== (job[field] || '')) {
-      saveField(job, field, value, editable);
-    }
-  });
-  wrap.appendChild(editable);
-
-  return wrap;
-}
-
-function buildModalMarkdownField(label, job, field) {
-  const wrap = document.createElement('div');
-  wrap.className = 'modal-field markdown-field';
-
-  const headerRow = document.createElement('div');
-  headerRow.className = 'markdown-field-header';
-  const labelEl = document.createElement('label');
-  labelEl.textContent = label;
-  headerRow.appendChild(labelEl);
-  const editBtn = document.createElement('button');
-  editBtn.type = 'button';
-  editBtn.className = 'linklike';
-  editBtn.textContent = 'Edit';
-  headerRow.appendChild(editBtn);
-  wrap.appendChild(headerRow);
-
-  const rendered = document.createElement('div');
-  rendered.className = 'editable markdown-rendered';
-  rendered.dataset.field = field;
-  renderMarkdownInto(rendered, job[field]);
-  wrap.appendChild(rendered);
-
-  const expandBtn = document.createElement('button');
-  expandBtn.type = 'button';
-  expandBtn.className = 'linklike markdown-expand-btn';
-  expandBtn.textContent = 'Show more';
-  expandBtn.style.display = 'none';
-  expandBtn.addEventListener('click', () => {
-    const expanded = rendered.classList.toggle('expanded');
-    expandBtn.textContent = expanded ? 'Show less' : 'Show more';
-  });
-  wrap.appendChild(expandBtn);
-
-  wrap._checkOverflow = () => checkMarkdownOverflow(rendered, expandBtn);
-
-  editBtn.addEventListener('click', () => {
-    const textarea = document.createElement('textarea');
-    textarea.className = 'editable markdown-raw';
-    textarea.dataset.field = field;
-    textarea.value = job[field] || '';
-    textarea.addEventListener('blur', () => {
-      const value = textarea.value.trim();
-      const finish = () => {
-        const fresh = document.createElement('div');
-        fresh.className = 'editable markdown-rendered';
-        fresh.dataset.field = field;
-        renderMarkdownInto(fresh, job[field]);
-        textarea.replaceWith(fresh);
-        expandBtn.textContent = 'Show more';
-        wrap._checkOverflow = () => checkMarkdownOverflow(fresh, expandBtn);
-        wrap._checkOverflow();
-      };
-      if (value !== (job[field] || '')) {
-        saveField(job, field, value, textarea).then(finish);
-      } else {
-        finish();
-      }
-    });
-    expandBtn.style.display = 'none';
-    rendered.replaceWith(textarea);
-    textarea.focus();
-  });
-
-  return wrap;
-}
-
-async function saveField(job, field, value, cell) {
-  const res = await fetch('/api/jobs/update', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      company: job.company,
-      date_added: job.date_added,
-      position_title: job.position_title,
-      link: job.link,
-      field,
-      value,
-    }),
-  });
-  let data = {};
-  try { data = await res.json(); } catch (e) { /* no body */ }
-  if (res.ok) {
-    job[field] = value;
-    if (data.date_applied !== undefined) job.date_applied = data.date_applied;
-    cell.classList.remove('saved-flash');
-    void cell.offsetWidth;
-    cell.classList.add('saved-flash');
-  } else {
-    alert(data.error || 'Failed to save change.');
-    if (cell && cell.isContentEditable) {
-      cell.textContent = job[field] || '';
-    }
-  }
-  return res.ok;
-}
-
-async function deleteJob(job) {
-  if (!confirm(`Delete the tracked job for ${job.company}${job.position_title ? ' — ' + job.position_title : ''}? This cannot be undone.`)) {
-    return;
-  }
-  const res = await fetch('/api/jobs/delete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ company: job.company, date_added: job.date_added, position_title: job.position_title, link: job.link }),
-  });
-  if (res.ok) {
-    allJobs = allJobs.filter(j => rowKey(j) !== rowKey(job));
-    closeModal();
-    render();
-  } else {
-    let data = {};
-    try { data = await res.json(); } catch (e) { /* no body */ }
-    alert(data.error || 'Failed to delete job.');
-  }
 }
 
 function addDropHandlers(body) {

@@ -38,8 +38,14 @@ from src.jobs_db import (  # noqa: E402
     find_job_by_link,
     funnel_stats,
     get_interviews,
+    delete_recruiter,
+    get_job_recruiters,
     get_recruiter_jobs,
     get_recruiters,
+    job_recruiter_links,
+    set_job_recruiter,
+    update_recruiter,
+    upsert_recruiter,
     job_silence_stats,
     upcoming_interviews,
     jobs_missing_interview_rows,
@@ -135,7 +141,10 @@ def index():
 
 @app.route("/kanban")
 def kanban():
-    return render_template("kanban.html", status_values=STATUS_VALUES)
+    # interview_types is new here: the board's modal can log rounds now, which
+    # the table could always do and it could not.
+    return render_template("kanban.html", status_values=STATUS_VALUES,
+                           interview_types=INTERVIEW_TYPES)
 
 
 @app.route("/api/jobs")
@@ -158,7 +167,24 @@ def api_jobs():
         query += " WHERE archived = 0"
     query += " ORDER BY date_added DESC"
     rows = db.execute(query).fetchall()
-    return jsonify([dict(r) for r in rows])
+
+    # One scan of recruiter_jobs for the whole list, not a lookup per row: this
+    # runs for every job rendered, and the table is tens of rows against a
+    # thousand jobs.
+    linked = get_job_recruiters()
+    out = []
+    for r in rows:
+        d = dict(r)
+        hit = linked.get((d["company"], d["date_added"],
+                          d.get("position_title") or "", d.get("link") or ""))
+        d["recruiter_id"] = hit["recruiter_id"] if hit else None
+        d["recruiter_name"] = hit["recruiter_name"] if hit else None
+        d["recruiter_agency"] = hit["recruiter_agency"] if hit else None
+        # Tells the row whether the link came from a mail, which is what makes
+        # it read-only until the user overrides it.
+        d["recruiter_from_triage"] = bool(hit and (hit.get("message_id") or "").strip())
+        out.append(d)
+    return jsonify(out)
 
 
 @app.route("/api/jobs/detail")
@@ -414,11 +440,179 @@ def api_silence():
 
 @app.route("/api/recruiters")
 def api_recruiters():
-    """Read-only. Recruiter rows are written by inbox-triage, never by the GUI."""
+    """
+    The GUI may write recruiters. It could not until this endpoint grew the
+    routes below, because an agency that reaches you by phone or referral never
+    appears in a mailbox and so had nowhere to live.
+
+    What replaced the old rule, rather than simply dropping it: a row the user
+    typed is flagged manual_entry, and upsert_recruiter will not let a later
+    parse overwrite its name or agency; and a job link carrying a message_id
+    belongs to inbox-triage, so the GUI refuses to replace it without an
+    explicit override. Both are enforced in jobs_db, not here, so the MCP server
+    and the cron scripts get them too.
+    """
     return jsonify({
         "recruiters": get_recruiters(),
         "roles": get_recruiter_jobs(),
         "coverage": recruiter_coverage(),
+    })
+
+
+def _recruiter_payload():
+    p = request.get_json(force=True) or {}
+    return (
+        (p.get("name") or "").strip(),
+        (p.get("agency") or "").strip(),
+        (p.get("email") or "").strip(),
+        (p.get("notes") or "").strip(),
+        p,
+    )
+
+
+def _recruiter_id(payload):
+    """
+    The recruiter id as an int, or None when it is absent or not a number.
+
+    Same shape as api_delete_interview's inline check, factored out because
+    three routes need it. Without it a body like {"recruiter_id": "abc"} reaches
+    int() unguarded and answers 500, where every other id-taking route here
+    answers 400.
+    """
+    try:
+        return int(payload.get("recruiter_id"))
+    except (TypeError, ValueError):
+        return None
+
+
+@app.route("/api/recruiters/add", methods=["POST"])
+def api_add_recruiter():
+    """
+    Creates a recruiter by hand, keyed on their email address.
+
+    Email is required because it is the identity, not merely a nice-to-have:
+    without it there is nothing to dedupe a later inbound message against, and
+    the same person would arrive again as a second row.
+    """
+    name, agency, email, notes, _ = _recruiter_payload()
+    if not email:
+        return jsonify({"error": "An email address is required — it identifies "
+                                 "the recruiter."}), 400
+    if not name:
+        return jsonify({"error": "A name is required."}), 400
+
+    try:
+        recruiter_id = upsert_recruiter(
+            source="email", identity=email, name=name, agency=agency,
+            email=email, notes=notes, manual_entry=True,
+        )
+    except _WRITE_EXC as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    row = next((r for r in get_recruiters() if r["id"] == recruiter_id), None)
+    return jsonify({"ok": True, "recruiter": row})
+
+
+@app.route("/api/recruiters/update", methods=["POST"])
+def api_update_recruiter():
+    name, agency, email, notes, payload = _recruiter_payload()
+    recruiter_id = _recruiter_id(payload)
+    if recruiter_id is None:
+        return jsonify({"error": "recruiter_id is required"}), 400
+
+    # None means "not sent, leave alone"; "" means "the user cleared it".
+    fields = {k: v for k, v in (("name", payload.get("name")),
+                                ("agency", payload.get("agency")),
+                                ("email", payload.get("email")),
+                                ("notes", payload.get("notes")))
+              if v is not None}
+    if not fields:
+        return jsonify({"error": "nothing to update"}), 400
+    if "name" in fields and not fields["name"].strip():
+        return jsonify({"error": "A name is required."}), 400
+
+    if not update_recruiter(recruiter_id, **fields):
+        return jsonify({"error": "No such recruiter."}), 404
+    row = next((r for r in get_recruiters() if r["id"] == recruiter_id), None)
+    return jsonify({"ok": True, "recruiter": row})
+
+
+@app.route("/api/recruiters/delete", methods=["POST"])
+def api_delete_recruiter():
+    """
+    Deletes a recruiter with its links and its messages.
+
+    The messages go too on purpose — see delete_recruiter. The counts come back
+    so the confirm dialog can name what it destroyed rather than saying "done".
+    """
+    payload = request.get_json(force=True) or {}
+    recruiter_id = _recruiter_id(payload)
+    if recruiter_id is None:
+        return jsonify({"error": "recruiter_id is required"}), 400
+
+    res = delete_recruiter(recruiter_id)
+    if not res.get("ok"):
+        return jsonify({"error": res.get("error", "Delete failed.")}), 404
+    return jsonify(res)
+
+
+@app.route("/api/jobs/recruiter", methods=["POST"])
+def api_set_job_recruiter():
+    """
+    Points one job at one recruiter, or clears it with recruiter_id: null.
+
+    Deliberately not a field on /api/jobs/update: that route interpolates the
+    column name into its UPDATE and is safe only because EDITABLE_COLUMNS gates
+    it. The recruiter link is not a jobs column at all — it lives in
+    recruiter_jobs — so folding it in would mean weakening the check that makes
+    the f-string defensible.
+
+    409 when the existing link came from inbox-triage: the response carries the
+    message it came from so the client can say what it is about to override.
+    """
+    payload = request.get_json(force=True) or {}
+    company = (payload.get("company") or "").strip()
+    date_added = payload.get("date_added")
+    if not company or date_added is None:
+        return jsonify({"error": "company and date_added are required"}), 400
+
+    # null or absent clears the link, which is a legitimate request; a value
+    # that is present but not a number is not.
+    raw_recruiter = payload.get("recruiter_id")
+    recruiter_id = None
+    if raw_recruiter not in (None, ""):
+        recruiter_id = _recruiter_id(payload)
+        if recruiter_id is None:
+            return jsonify({"error": "recruiter_id must be a number, or null "
+                                     "to clear the link."}), 400
+
+    key = dict(
+        company=company,
+        date_added=date_added,
+        position_title=payload.get("position_title") or "",
+        link=payload.get("link") or "",
+    )
+
+    res = set_job_recruiter(
+        **key,
+        recruiter_id=recruiter_id,
+        override=bool(payload.get("override")),
+    )
+    if not res["ok"]:
+        # An unknown recruiter is the caller's mistake; a triage link is not.
+        if res.get("error"):
+            return jsonify({"error": res["error"]}), 404
+        return jsonify({
+            "error": "This job was linked by inbox-triage from a message. "
+                     "Overriding it means the next run will not restore it.",
+            "blocked": res["blocked"],
+        }), 409
+
+    current = job_recruiter_links(**key)
+    return jsonify({
+        "ok": True,
+        "removed": res["removed"],
+        "recruiter": current[0] if current else None,
     })
 
 

@@ -249,6 +249,32 @@
     font-size: 12px;
   }
   .followup-chip.non-date { color: var(--muted); font-style: italic; }
+
+  /* Recruiter: the pill on the row, and the picker in the detail panel. */
+  .recruiter-pill {
+    display: inline-flex;
+    align-items: center;
+    background: var(--card);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Dashed for a link inbox-triage made, so the rows you can freely change are
+     distinguishable from the ones an override would be needed to move. */
+  .recruiter-pill.from-triage { border-style: dashed; }
+  .recruiter-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .recruiter-select { min-width: 260px; }
+  .recruiter-current { font-weight: 600; }
+  .recruiter-provenance { color: var(--muted); font-size: 12px; font-style: italic; }
+  .recruiter-new { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .recruiter-new input { padding: 4px 6px; }
   .followup-chip button {
     background: none;
     border: none;
@@ -487,9 +513,40 @@
   <div class="empty" id="emptyState" style="display:none;">No jobs match your filters.</div>
 </main>
 
+<script src="{{ url_for('static', filename='job_fields.js') }}"></script>
 <script>
 const STATUS_VALUES = {{ status_values | tojson }};
+const INTERVIEW_TYPES = {{ interview_types|tojson }};
 let allJobs = [];
+
+// The field builders live in static/job_fields.js so the kanban modal can use
+// the same ones. Aliased to bare names here because the rest of this file --
+// and the kanban copy it was extracted from -- already calls them that way.
+const {
+  rowKey, localISODate, startOfWeekISO, isValidISODate,
+  parseFollowupLog, serializeFollowupLog,
+  renderMarkdownInto, appendInlineMarkdown,
+  checkMarkdownOverflow, refreshMarkdownFields, saveField, jobKeyFields,
+} = JobFields;
+
+const {
+  makeDateField, renderDateInput, makeFollowupField, renderFollowupField,
+  makeDetailField, makeMarkdownField, makeRecruiterField, makeInterviewsField,
+  makeDeleteField,
+} = JobFields.create({
+  fieldClass: 'detail-field',
+  notesClass: ' notes-field',
+  // Every click inside an expanded detail row would otherwise bubble to the
+  // row handler and collapse the row out from under the edit.
+  stopClicks: true,
+  tagFields: false,
+  afterSave: () => updateGoalBadge(),
+  interviewTypes: INTERVIEW_TYPES,
+  onDeleted: (job) => {
+    allJobs = allJobs.filter(j => rowKey(j) !== rowKey(job));
+    render();
+  },
+});
 
 async function loadJobs() {
   // Arriving from the Insights funnel means matching the population it counted,
@@ -498,112 +555,6 @@ async function loadJobs() {
   const res = await fetch('/api/jobs' + (fromFunnel ? '?include_archived=1' : ''));
   allJobs = await res.json();
   render();
-}
-
-function rowKey(job) {
-  return `${job.company}::${job.date_added}::${job.position_title || ''}::${job.link || ''}`;
-}
-
-function localISODate(d) {
-  const yr = d.getFullYear();
-  const mo = String(d.getMonth() + 1).padStart(2, '0');
-  const da = String(d.getDate()).padStart(2, '0');
-  return `${yr}-${mo}-${da}`;
-}
-
-function startOfWeekISO(d) {
-  const copy = new Date(d);
-  copy.setDate(copy.getDate() - copy.getDay());
-  return localISODate(copy);
-}
-
-function renderMarkdownInto(container, raw) {
-  container.innerHTML = '';
-  const lines = (raw || '').split('\n');
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (/^\s*$/.test(line)) { i++; continue; }
-    const heading = /^#{1,6}\s+(.*)$/.exec(line);
-    if (heading) {
-      const h = document.createElement('h4');
-      appendInlineMarkdown(h, heading[1]);
-      container.appendChild(h);
-      i++;
-      continue;
-    }
-    if (/^[-*]\s+/.test(line)) {
-      const ul = document.createElement('ul');
-      while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
-        const li = document.createElement('li');
-        appendInlineMarkdown(li, lines[i].replace(/^[-*]\s+/, ''));
-        ul.appendChild(li);
-        i++;
-      }
-      container.appendChild(ul);
-      continue;
-    }
-    const para = document.createElement('p');
-    let first = true;
-    while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^[-*]\s+/.test(lines[i]) && !/^#{1,6}\s+/.test(lines[i])) {
-      if (!first) para.appendChild(document.createElement('br'));
-      appendInlineMarkdown(para, lines[i]);
-      first = false;
-      i++;
-    }
-    container.appendChild(para);
-  }
-  if (!container.childNodes.length) {
-    const empty = document.createElement('p');
-    empty.className = 'markdown-empty';
-    empty.textContent = '(empty)';
-    container.appendChild(empty);
-  }
-}
-
-function appendInlineMarkdown(parent, text) {
-  const tokenRe = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
-  let lastIndex = 0;
-  let m;
-  while ((m = tokenRe.exec(text)) !== null) {
-    if (m.index > lastIndex) parent.appendChild(document.createTextNode(text.slice(lastIndex, m.index)));
-    const token = m[0];
-    if (token.startsWith('**')) {
-      const strong = document.createElement('strong');
-      strong.textContent = token.slice(2, -2);
-      parent.appendChild(strong);
-    } else if (token.startsWith('`')) {
-      const code = document.createElement('code');
-      code.textContent = token.slice(1, -1);
-      parent.appendChild(code);
-    } else {
-      const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
-      if (linkMatch && /^https?:\/\//i.test(linkMatch[2])) {
-        const a = document.createElement('a');
-        a.href = linkMatch[2];
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        a.textContent = linkMatch[1];
-        parent.appendChild(a);
-      } else {
-        parent.appendChild(document.createTextNode(token));
-      }
-    }
-    lastIndex = tokenRe.lastIndex;
-  }
-  if (lastIndex < text.length) parent.appendChild(document.createTextNode(text.slice(lastIndex)));
-}
-
-function checkMarkdownOverflow(rendered, expandBtn) {
-  if (rendered.classList.contains('expanded')) { return; }
-  const overflowing = rendered.scrollHeight > rendered.clientHeight + 1;
-  expandBtn.style.display = overflowing ? 'inline-block' : 'none';
-}
-
-function refreshMarkdownFields(scope) {
-  scope.querySelectorAll('.markdown-field').forEach(el => {
-    if (typeof el._checkOverflow === 'function') el._checkOverflow();
-  });
 }
 
 function updateGoalBadge() {
@@ -719,6 +670,7 @@ function buildDetailGrid(job, rounds) {
   const grid = document.createElement('div');
   grid.className = 'detail-grid';
 
+  grid.appendChild(makeRecruiterField(job, () => render()));
   grid.appendChild(makeDetailField('Contacts', job, 'contacts'));
   grid.appendChild(makeDateField('Outreach Date', job, 'outreach_date'));
   grid.appendChild(makeDateField('Date Applied', job, 'date_applied'));
@@ -731,20 +683,10 @@ function buildDetailGrid(job, rounds) {
   return grid;
 }
 
-const INTERVIEW_TYPES = {{ interview_types|tojson }};
 
 // The full composite key comes straight off the row the user opened, so an
 // interview is always attached to one specific posting - never matched by
 // company name, which is ambiguous for the companies you applied to twice.
-function jobKeyFields(job) {
-  return {
-    company: job.company || '',
-    date_added: job.date_added || '',
-    position_title: job.position_title || '',
-    link: job.link || '',
-  };
-}
-
 // --- Funnel drill-through ---------------------------------------------------
 // The Insights funnel links here with ?stage=&source=. Its stages are predicates
 // over several fields, not single status values, so they cannot ride the existing
@@ -814,420 +756,6 @@ async function hydrateFunnelFilter() {
   }
 }
 
-function makeInterviewsField(job, rounds) {
-  const wrap = document.createElement('div');
-  wrap.className = 'detail-field interviews-field';
-
-  const label = document.createElement('label');
-  label.textContent = 'Interview Rounds';
-  wrap.appendChild(label);
-
-  // Rounds arrive with the panel, so this renders synchronously -- no
-  // placeholder, and no fetch reachable from a builder.
-  const list = document.createElement('div');
-  list.className = 'interview-list';
-  wrap.appendChild(list);
-  renderInterviews(job, list, rounds);
-
-  const form = document.createElement('div');
-  form.className = 'interview-form';
-
-  const typeSel = document.createElement('select');
-  for (const t of INTERVIEW_TYPES) {
-    const opt = document.createElement('option');
-    opt.value = t;
-    opt.textContent = t.replace(/_/g, ' ');
-    typeSel.appendChild(opt);
-  }
-
-  const labelInput = document.createElement('input');
-  labelInput.type = 'text';
-  labelInput.placeholder = 'describe it';
-  labelInput.style.display = 'none';
-  typeSel.addEventListener('change', () => {
-    labelInput.style.display = typeSel.value === 'other' ? '' : 'none';
-  });
-
-  // Which of the two dates this round carries. A round is booked or it is held,
-  // never both -- the API rejects both set -- so this picks the field rather
-  // than offering two date boxes that can contradict each other.
-  const whenSel = document.createElement('select');
-  whenSel.title = 'Whether this round has happened yet';
-  for (const [v, t] of [['occurred', 'happened on'], ['scheduled', 'booked for']]) {
-    const opt = document.createElement('option');
-    opt.value = v;
-    opt.textContent = t;
-    whenSel.appendChild(opt);
-  }
-
-  const dateInput = document.createElement('input');
-  dateInput.type = 'date';
-  dateInput.value = new Date().toISOString().slice(0, 10);
-  const syncWhen = () => {
-    const booked = whenSel.value === 'scheduled';
-    dateInput.title = booked ? 'Date the round is booked for'
-                             : 'Date the round actually happened';
-    // A booked round is not an outcome yet, so there is nothing to rate.
-    ratingSel.disabled = booked;
-    if (booked) ratingSel.value = '';
-    btn.textContent = booked ? 'Book Round' : 'Log Round';
-  };
-  whenSel.addEventListener('change', syncWhen);
-
-  const ratingSel = document.createElement('select');
-  ratingSel.title = 'How it felt (optional)';
-  for (const r of ['', '1', '2', '3', '4', '5']) {
-    const opt = document.createElement('option');
-    opt.value = r;
-    opt.textContent = r === '' ? 'rating —' : r;
-    ratingSel.appendChild(opt);
-  }
-
-  const loopInput = document.createElement('input');
-  loopInput.type = 'text';
-  loopInput.placeholder = 'loop id (same onsite)';
-  loopInput.title = 'Rounds sharing a loop id resolve together as one onsite';
-
-  const notesInput = document.createElement('input');
-  notesInput.type = 'text';
-  notesInput.placeholder = 'notes';
-
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'primary';
-  btn.textContent = 'Log Round';
-
-  const err = document.createElement('div');
-  err.className = 'interview-error';
-
-  btn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    err.textContent = '';
-    const body = Object.assign(jobKeyFields(job), {
-      interview_type: typeSel.value,
-      type_label: labelInput.value.trim(),
-      occurred_date: whenSel.value === 'occurred' ? dateInput.value : '',
-      scheduled_date: whenSel.value === 'scheduled' ? dateInput.value : '',
-      self_rating: ratingSel.value,
-      loop_id: loopInput.value.trim(),
-      notes: notesInput.value.trim(),
-    });
-    const res = await fetch('/api/interviews/add', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) { err.textContent = data.error || 'Could not save that round.'; return; }
-    loopInput.value = ''; notesInput.value = ''; ratingSel.value = ''; labelInput.value = '';
-    reloadInterviews(job, list);
-  });
-
-  syncWhen();
-
-  for (const el of [typeSel, labelInput, whenSel, dateInput, ratingSel, loopInput,
-                    notesInput, btn]) {
-    el.addEventListener('click', (e) => e.stopPropagation());
-    form.appendChild(el);
-  }
-  wrap.appendChild(form);
-  wrap.appendChild(err);
-
-  return wrap;
-}
-
-// Only after this panel writes a round. Reads the same detail endpoint the
-// expand used, minus job_summary, so one job's rounds refresh without touching
-// the table.
-async function reloadInterviews(job, list) {
-  const params = new URLSearchParams(jobKeyFields(job));
-  params.set('summary', '0');
-  const res = await fetch('/api/jobs/detail?' + params.toString());
-  const data = await res.json();
-  renderInterviews(job, list, data.interviews || []);
-}
-
-function renderInterviews(job, list, rounds) {
-  list.innerHTML = '';
-  if (!rounds.length) {
-    list.innerHTML = '<span class="interview-empty">No rounds logged.</span>';
-    return;
-  }
-  for (const r of rounds) {
-    const row = document.createElement('div');
-    row.className = 'interview-row';
-    const type = r.interview_type === 'other' && r.type_label
-      ? r.type_label : (r.interview_type || '').replace(/_/g, ' ');
-    // A booked round has no occurred_date; showing a blank there reads as a bug.
-    const bits = [r.occurred_date || ('booked ' + (r.scheduled_date || '?')), type];
-    if (r.loop_id) bits.push('loop: ' + r.loop_id);
-    if (r.self_rating) bits.push(r.self_rating + '/5');
-    if (r.notes) bits.push(r.notes);
-    const span = document.createElement('span');
-    span.textContent = bits.join(' · ');
-    row.appendChild(span);
-
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'linklike';
-    del.textContent = 'remove';
-    del.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await fetch('/api/interviews/delete', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id: r.id}),
-      });
-      reloadInterviews(job, list);
-    });
-    row.appendChild(del);
-    list.appendChild(row);
-  }
-}
-
-function makeDeleteField(job) {
-  const wrap = document.createElement('div');
-  wrap.className = 'detail-field';
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'delete-job-btn';
-  btn.textContent = 'Delete Job';
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    deleteJob(job);
-  });
-  wrap.appendChild(btn);
-  return wrap;
-}
-
-function isValidISODate(str) {
-  if (!str) return false;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
-  return !isNaN(Date.parse(str));
-}
-
-function parseFollowupLog(raw) {
-  return (raw || '').split(',').map(s => s.trim()).filter(Boolean);
-}
-
-function serializeFollowupLog(tokens) {
-  return tokens.join(', ');
-}
-
-function makeDateField(label, job, field) {
-  const wrap = document.createElement('div');
-  wrap.className = 'detail-field';
-
-  const labelEl = document.createElement('label');
-  labelEl.textContent = label;
-  wrap.appendChild(labelEl);
-
-  wrap.appendChild(renderDateInput(job, field));
-
-  return wrap;
-}
-
-function renderDateInput(job, field) {
-  const value = job[field] || '';
-
-  if (value && !isValidISODate(value)) {
-    const box = document.createElement('div');
-    box.className = 'non-date-value';
-    const text = document.createElement('span');
-    text.className = 'raw-text';
-    text.textContent = value;
-    box.appendChild(text);
-
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = 'Replace with date';
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const input = document.createElement('input');
-      input.type = 'date';
-      input.dataset.field = field;
-      input.addEventListener('click', (ev) => ev.stopPropagation());
-      input.addEventListener('change', () => {
-        saveField(job, field, input.value, input).then(() => updateGoalBadge());
-      });
-      box.replaceWith(input);
-    });
-    box.appendChild(btn);
-    return box;
-  }
-
-  const input = document.createElement('input');
-  input.type = 'date';
-  input.value = value;
-  input.dataset.field = field;
-  input.addEventListener('click', (e) => e.stopPropagation());
-  input.addEventListener('change', () => {
-    saveField(job, field, input.value, input).then(() => updateGoalBadge());
-  });
-  return input;
-}
-
-function makeFollowupField(label, job, field) {
-  const wrap = document.createElement('div');
-  wrap.className = 'detail-field';
-
-  const labelEl = document.createElement('label');
-  labelEl.textContent = label;
-  wrap.appendChild(labelEl);
-
-  wrap.appendChild(renderFollowupField(job, field, wrap));
-
-  return wrap;
-}
-
-function renderFollowupField(job, field, container) {
-  const tokens = parseFollowupLog(job[field]);
-
-  const box = document.createElement('div');
-  box.className = 'followup-field';
-
-  for (const token of tokens) {
-    const chip = document.createElement('span');
-    chip.className = 'followup-chip' + (isValidISODate(token) ? '' : ' non-date');
-    const text = document.createElement('span');
-    text.textContent = token;
-    chip.appendChild(text);
-
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button';
-    removeBtn.innerHTML = '&times;';
-    removeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const updated = tokens.filter(t => t !== token);
-      const value = serializeFollowupLog(updated);
-      saveField(job, field, value, chip).then(() => {
-        const fresh = renderFollowupField(job, field, container);
-        box.replaceWith(fresh);
-      });
-    });
-    chip.appendChild(removeBtn);
-    box.appendChild(chip);
-  }
-
-  const addWrap = document.createElement('span');
-  addWrap.className = 'followup-add';
-  const dateInput = document.createElement('input');
-  dateInput.type = 'date';
-  dateInput.addEventListener('click', (e) => e.stopPropagation());
-  addWrap.appendChild(dateInput);
-
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.textContent = 'Add';
-  addBtn.disabled = tokens.length >= 2;
-  addBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (!dateInput.value || tokens.includes(dateInput.value)) return;
-    const updated = [...tokens, dateInput.value];
-    const value = serializeFollowupLog(updated);
-    saveField(job, field, value, addWrap).then(() => {
-      const fresh = renderFollowupField(job, field, container);
-      box.replaceWith(fresh);
-    });
-  });
-  addWrap.appendChild(addBtn);
-  box.appendChild(addWrap);
-
-  return box;
-}
-
-function makeDetailField(label, job, field, isNotes) {
-  const wrap = document.createElement('div');
-  wrap.className = 'detail-field' + (isNotes ? ' notes-field' : '');
-
-  const labelEl = document.createElement('label');
-  labelEl.textContent = label;
-  wrap.appendChild(labelEl);
-
-  const editable = document.createElement('div');
-  editable.className = 'editable';
-  editable.contentEditable = 'true';
-  editable.textContent = job[field] || '';
-  editable.addEventListener('click', (e) => e.stopPropagation());
-  editable.addEventListener('blur', () => {
-    const value = editable.textContent.trim();
-    if (value !== (job[field] || '')) {
-      saveField(job, field, value, editable);
-    }
-  });
-  wrap.appendChild(editable);
-
-  return wrap;
-}
-
-function makeMarkdownField(label, job, field) {
-  const wrap = document.createElement('div');
-  wrap.className = 'detail-field notes-field markdown-field';
-
-  const headerRow = document.createElement('div');
-  headerRow.className = 'markdown-field-header';
-  const labelEl = document.createElement('label');
-  labelEl.textContent = label;
-  headerRow.appendChild(labelEl);
-  const editBtn = document.createElement('button');
-  editBtn.type = 'button';
-  editBtn.className = 'linklike';
-  editBtn.textContent = 'Edit';
-  headerRow.appendChild(editBtn);
-  wrap.appendChild(headerRow);
-
-  const rendered = document.createElement('div');
-  rendered.className = 'editable markdown-rendered';
-  renderMarkdownInto(rendered, job[field]);
-  rendered.addEventListener('click', (e) => e.stopPropagation());
-  wrap.appendChild(rendered);
-
-  const expandBtn = document.createElement('button');
-  expandBtn.type = 'button';
-  expandBtn.className = 'linklike markdown-expand-btn';
-  expandBtn.textContent = 'Show more';
-  expandBtn.style.display = 'none';
-  expandBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const expanded = rendered.classList.toggle('expanded');
-    expandBtn.textContent = expanded ? 'Show less' : 'Show more';
-  });
-  wrap.appendChild(expandBtn);
-
-  wrap._checkOverflow = () => checkMarkdownOverflow(rendered, expandBtn);
-
-  editBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const textarea = document.createElement('textarea');
-    textarea.className = 'editable markdown-raw';
-    textarea.value = job[field] || '';
-    textarea.addEventListener('click', (ev) => ev.stopPropagation());
-    textarea.addEventListener('blur', () => {
-      const value = textarea.value.trim();
-      const finish = () => {
-        const fresh = document.createElement('div');
-        fresh.className = 'editable markdown-rendered';
-        renderMarkdownInto(fresh, job[field]);
-        fresh.addEventListener('click', (ev) => ev.stopPropagation());
-        textarea.replaceWith(fresh);
-        expandBtn.textContent = 'Show more';
-        wrap._checkOverflow = () => checkMarkdownOverflow(fresh, expandBtn);
-        wrap._checkOverflow();
-      };
-      if (value !== (job[field] || '')) {
-        saveField(job, field, value, textarea).then(finish);
-      } else {
-        finish();
-      }
-    });
-    expandBtn.style.display = 'none';
-    rendered.replaceWith(textarea);
-    textarea.focus();
-  });
-
-  return wrap;
-}
-
 function makeCell(text) {
   const td = document.createElement('td');
   td.textContent = text || '';
@@ -1263,6 +791,9 @@ function makeCompanyCell(job) {
     }
   });
   wrap.appendChild(editable);
+
+  const pill = JobFields.recruiterBadge(job);
+  if (pill) wrap.appendChild(pill);
 
   if (job.link) {
     const a = document.createElement('a');
@@ -1302,55 +833,6 @@ function makeStatusCell(job) {
   });
   td.appendChild(select);
   return td;
-}
-
-async function saveField(job, field, value, cell) {
-  const res = await fetch('/api/jobs/update', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      company: job.company,
-      date_added: job.date_added,
-      position_title: job.position_title,
-      link: job.link,
-      field,
-      value,
-    }),
-  });
-  let data = {};
-  try { data = await res.json(); } catch (e) { /* no body */ }
-  if (res.ok) {
-    job[field] = value;
-    if (data.date_applied !== undefined) job.date_applied = data.date_applied;
-    cell.classList.remove('saved-flash');
-    void cell.offsetWidth;
-    cell.classList.add('saved-flash');
-  } else {
-    alert(data.error || 'Failed to save change.');
-    if (cell && cell.isContentEditable) {
-      cell.textContent = job[field] || '';
-    }
-  }
-  return res.ok;
-}
-
-async function deleteJob(job) {
-  if (!confirm(`Delete the tracked job for ${job.company}${job.position_title ? ' — ' + job.position_title : ''}? This cannot be undone.`)) {
-    return;
-  }
-  const res = await fetch('/api/jobs/delete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ company: job.company, date_added: job.date_added, position_title: job.position_title, link: job.link }),
-  });
-  if (res.ok) {
-    allJobs = allJobs.filter(j => rowKey(j) !== rowKey(job));
-    render();
-  } else {
-    let data = {};
-    try { data = await res.json(); } catch (e) { /* no body */ }
-    alert(data.error || 'Failed to delete job.');
-  }
 }
 
 function openAddJobModal() {
