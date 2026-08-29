@@ -3,63 +3,8 @@
 <head>
 <meta charset="utf-8">
 <title>Job Tracker</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='job_views.css') }}">
 <style>
-  :root {
-    color-scheme: light dark;
-    --bg: #f7f7f8;
-    --card: #ffffff;
-    --border: #e2e2e6;
-    --text: #1d1d1f;
-    --muted: #6b6b74;
-    --accent: #3457d5;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #16161a;
-      --card: #1f1f24;
-      --border: #303038;
-      --text: #eaeaef;
-      --muted: #9a9aa5;
-      --accent: #6f8dff;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-  }
-  header {
-    padding: 20px 28px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  h1 { font-size: 18px; margin: 0; }
-  .stats { color: var(--muted); font-size: 13px; }
-  .goal-badge { color: var(--muted); font-size: 13px; }
-  .goal-badge.goal-met { color: #2e9e4f; font-weight: 600; }
-  nav.view-nav { display: flex; gap: 4px; }
-  nav.view-nav a {
-    padding: 6px 12px;
-    border-radius: 6px;
-    font-size: 13px;
-    text-decoration: none;
-    color: var(--muted);
-  }
-  nav.view-nav a.active { background: var(--accent); color: #fff; }
-  nav.view-nav a:not(.active):hover { background: var(--bg); }
-  .controls {
-    padding: 14px 28px;
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    border-bottom: 1px solid var(--border);
-  }
   input[type="search"], input[type="date"], select {
     padding: 7px 10px;
     border: 1px solid var(--border);
@@ -67,17 +12,6 @@
     background: var(--card);
     color: var(--text);
     font-size: 13px;
-  }
-  input[type="search"] { flex: 1; min-width: 200px; }
-  .date-filter { display: flex; align-items: center; gap: 6px; }
-  .date-filter span { color: var(--muted); font-size: 13px; }
-  button.linklike {
-    background: none;
-    border: none;
-    color: var(--accent);
-    font-size: 13px;
-    cursor: pointer;
-    padding: 7px 4px;
   }
   main { padding: 20px 28px 60px; }
   table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 8px; overflow: hidden; }
@@ -112,10 +46,8 @@
     padding: 2px 4px;
     border-radius: 4px;
   }
-  .company-editable:hover { outline: 1px dashed var(--accent); }
   .company-editable[contenteditable="true"]:focus { outline: 2px solid var(--accent); }
   a.company-link-icon { color: var(--accent); text-decoration: none; }
-  a.company-link-icon:hover { text-decoration: underline; }
   .delete-job-btn {
     align-self: flex-start;
     background: none;
@@ -126,7 +58,6 @@
     cursor: pointer;
     font-size: 13px;
   }
-  .delete-job-btn:hover { background: #d9534f; color: #fff; }
   .caret {
     display: inline-block;
     width: 14px;
@@ -166,16 +97,8 @@
     max-height: 320px;
     overflow-y: auto;
   }
-  .saved-flash { animation: flash 0.6s ease; }
   @keyframes flash { from { background: #d9f5df; } to { background: transparent; } }
   .empty { color: var(--muted); padding: 40px; text-align: center; }
-  .markdown-field-header { display: flex; justify-content: space-between; align-items: center; }
-  .markdown-rendered { white-space: normal; line-height: 1.4; }
-  .markdown-rendered p { margin: 0 0 8px; }
-  .markdown-rendered p:last-child { margin-bottom: 0; }
-  .markdown-rendered ul { margin: 0 0 8px; padding-left: 20px; }
-  .markdown-rendered h4 { margin: 10px 0 4px; font-size: 13px; }
-  .markdown-rendered code { background: rgba(127,127,127,0.15); padding: 1px 4px; border-radius: 3px; }
   .detail-field.notes-field .editable.markdown-rendered:not(.expanded) {
     max-height: 4.2em;
     overflow: hidden;
@@ -188,7 +111,6 @@
     height: 1.4em;
     background: linear-gradient(to bottom, transparent, var(--card));
   }
-  .markdown-expand-btn { align-self: flex-start; padding-left: 0; }
   textarea.markdown-raw {
     width: 100%;
     font-family: inherit;
@@ -200,7 +122,6 @@
     background: var(--card);
     color: var(--text);
   }
-
   .detail-field input[type="date"] {
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -220,24 +141,7 @@
     background: var(--card);
     font-size: 13px;
   }
-  .non-date-value .raw-text { flex: 1; color: var(--text); }
-  .non-date-value button {
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    color: var(--accent);
-    font-size: 11px;
-    padding: 3px 7px;
-    cursor: pointer;
-    white-space: nowrap;
-  }
   .non-date-value button:hover { background: var(--bg); }
-  .followup-field {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-  }
   .followup-chip {
     display: inline-flex;
     align-items: center;
@@ -248,8 +152,6 @@
     padding: 3px 6px 3px 10px;
     font-size: 12px;
   }
-  .followup-chip.non-date { color: var(--muted); font-style: italic; }
-
   /* Recruiter: the pill on the row, and the picker in the detail panel. */
   .recruiter-pill {
     display: inline-flex;
@@ -266,31 +168,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  /* Dashed for a link inbox-triage made, so the rows you can freely change are
-     distinguishable from the ones an override would be needed to move. */
-  .recruiter-pill.from-triage { border-style: dashed; }
-  .recruiter-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .recruiter-select { min-width: 260px; }
-  .recruiter-current { font-weight: 600; }
-  .recruiter-provenance { color: var(--muted); font-size: 12px; font-style: italic; }
-  .recruiter-new { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-  .recruiter-new input { padding: 4px 6px; }
-  .followup-chip button {
-    background: none;
-    border: none;
-    color: var(--muted);
-    cursor: pointer;
-    font-size: 13px;
-    line-height: 1;
-    padding: 2px 4px;
-    border-radius: 999px;
-  }
   .followup-chip button:hover { background: var(--bg); color: var(--text); }
-  .followup-add {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
   .followup-add input[type="date"] {
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -299,75 +178,8 @@
     color: var(--text);
     font-size: 12px;
   }
-  .followup-add button {
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    color: var(--accent);
-    font-size: 11px;
-    padding: 4px 8px;
-    cursor: pointer;
-  }
   .followup-add button:hover { background: var(--bg); }
-  .followup-add button:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  button.primary {
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    padding: 7px 14px;
-    font-size: 13px;
-    cursor: pointer;
-  }
-  button.primary:hover { opacity: 0.9; }
-  .modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.45);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-    z-index: 100;
-  }
-  .modal-backdrop.hidden { display: none; }
-  .modal-panel {
-    background: var(--card);
-    border-radius: 12px;
-    width: 100%;
-    max-width: 520px;
-    max-height: calc(100vh - 80px);
-    overflow-y: auto;
-    padding: 20px 22px 22px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-  }
-  .modal-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-    margin-bottom: 14px;
-  }
   .modal-head h2 { font-size: 16px; margin: 0; }
-  .modal-close {
-    background: none;
-    border: none;
-    color: var(--muted);
-    font-size: 20px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 6px;
-  }
-  .modal-close:hover { background: var(--bg); color: var(--text); }
-  .modal-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
-  .modal-field label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: var(--muted);
-  }
   .modal-field input[type="text"], .modal-field input[type="date"], .modal-field select, .modal-field textarea {
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -383,18 +195,12 @@
     outline-offset: -1px;
   }
   .interviews-field { grid-column: 1 / -1; }
-  .interview-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
-  .interview-row {
-    display: flex; justify-content: space-between; align-items: center; gap: 10px;
-    font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
-  }
-  .interview-empty { font-size: 13px; color: var(--muted); }
-  .interview-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  /* Kept out of job_views.css so the board can keep its own copy -- see the
+     note beside kanban.html's. */
   .interview-form input, .interview-form select {
     padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
     background: var(--card); color: var(--text); font-size: 13px;
   }
-  .interview-error { color: #d64545; font-size: 12px; margin-top: 6px; }
   .funnel-banner {
     display: flex; align-items: center; gap: 12px;
     padding: 10px 28px; font-size: 13px;
@@ -402,8 +208,6 @@
   }
   .funnel-banner a { color: var(--accent); margin-left: auto; }
   .funnel-banner .muted-inline { color: var(--muted); }
-  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
-  .modal-error { color: #d64545; font-size: 12px; margin-bottom: 10px; display: none; }
 </style>
 </head>
 <body>
