@@ -397,6 +397,10 @@ def api_update_job():
 
 @app.route("/insights")
 def insights_view():
+    # One query, split two ways. The card shows only what is ahead, but a booking
+    # whose date went by with no outcome recorded has to be counted somewhere --
+    # it is invisible to missing_rounds, which only sees jobs with no round at all.
+    booked = upcoming_interviews(include_past=True)
     return render_template(
         "insights.html",
         stats=interview_stats(),
@@ -408,7 +412,8 @@ def insights_view():
         recruiter_roles=get_recruiter_jobs(),
         coverage=recruiter_coverage(),
         silence=job_silence_stats(),
-        upcoming=upcoming_interviews(),
+        upcoming=[r for r in booked if not r["overdue"]],
+        past_bookings=[r for r in booked if r["overdue"]],
         upcoming_window=UPCOMING_WINDOW_DAYS,
         missing_rounds=jobs_missing_interview_rows(),
     )

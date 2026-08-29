@@ -2292,8 +2292,8 @@ def job_silence_stats() -> dict:
 # How far ahead the Insights card shows in its table. A horizon for attention,
 # not a filter: rounds past it are counted on an overflow line rather than
 # dropped, because a booking nobody can see is the same problem as a booking
-# nobody made. Overdue rounds ignore this entirely -- they are the ones most
-# likely to be something forgotten.
+# nobody made. This window partitions future rounds only -- a booking whose date
+# has gone by never enters the table, and is counted on its own line instead.
 UPCOMING_WINDOW_DAYS = 14
 
 
@@ -2342,6 +2342,11 @@ def jobs_missing_interview_rows() -> list[dict]:
     A LEFT JOIN on the full composite key, so a round recorded against a
     slightly different key still reads as missing. That is the intent: such a
     round is unreachable from the table too.
+
+    This does NOT catch the other drift: a job whose booking has a past date and
+    no outcome recorded has an interview row, so `i.id IS NULL` excludes it. That
+    set is counted separately on the card from the `overdue` rows of
+    upcoming_interviews(include_past=True). The two numbers do not overlap.
     """
     conn = _connect()
     if not conn:

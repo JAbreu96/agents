@@ -538,7 +538,10 @@ Drafts are never sent. Triage does not send email; it leaves work ready for Joel
 
 - **An interview was booked** (mail names an agreed date *and* time — a confirmation, a
   calendar invite, an "you're all set for Tuesday at 2"): `jobs_db.add_interview` with
-  `scheduled_date` and no `occurred_date`. This is what puts it on the "Coming up" card.
+  `scheduled_date` and no `occurred_date`. A date still ahead puts it in the "Coming up"
+  table; a date already past is counted on the card's "no outcome recorded" line instead,
+  since the table is future-only. Either way it is visible, and either way
+  `mark_interview_occurred()` is what clears it once the round has actually happened.
 
   Recording a booking **cannot** move any rate. `classify_interviews()` drops
   booked-but-not-held rounds before `interview_stats()` sees them, and `add_interview`'s

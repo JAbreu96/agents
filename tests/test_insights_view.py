@@ -9,8 +9,9 @@ the first has to count roles too -- but recruiter_jobs is many-to-many, and GTE
 arrived from two agencies within a day. COUNT(*) would have reported it twice.
 
 "Coming up" shows a 14-day window, and a window that drops rows would contradict
-the note printed directly beneath it. Nothing in the live data reaches past the
-window or goes overdue, so only a test can hold the line here.
+the note printed directly beneath it. The table is future-only, so a booking whose
+date has gone by has to surface as a count instead of vanishing -- and live data
+drifts through these states too quietly for anything but a test to hold the line.
 """
 
 import pytest
@@ -200,17 +201,58 @@ def test_the_page_tables_a_booking_inside_the_window(db):
     assert "Inside" in html and "booked beyond" not in html
 
 
+def _card(html):
+    """The Coming up card, and the table inside it, as separate strings."""
+    card = html.split("Coming up")[1].split("source-bar")[0]
+    table = card.split("<table>")[1].split("</table>")[0] if "<table>" in card else ""
+    return card, table
+
+
 def test_the_page_never_tables_a_past_booking(db):
     """
     The regression this file exists for: the card used to be handed
     include_past=True and sorted past-dated rounds to the top of the table.
     """
     _book(db, "Forgotten", -90)
-    html = _render(db)
-    coming_up = html.split("Coming up")[1].split("source-bar")[0]
-    assert "Forgotten" not in coming_up
-    assert "overdue" not in coming_up
-    assert "Nothing booked." in coming_up
+    card, table = _card(_render(db))
+    assert "Forgotten" not in table
+    assert "overdue" not in card
+    assert "Nothing booked." in card
+
+
+def test_a_past_booking_is_counted_even_though_it_is_not_tabled(db):
+    """
+    Hiding it from the table is the point; hiding it from the page is how a round
+    that happened and was never marked held stops existing. missing_rounds cannot
+    catch these -- the job has an interview row -- so this line is the only place.
+    """
+    _book(db, "Forgotten", -90)
+    card, table = _card(_render(db))
+    assert "1</span>\n      booked before today with no outcome recorded" in card
+    assert "Forgotten" in card and "Forgotten" not in table
+
+
+def test_the_count_line_is_absent_when_every_booking_is_ahead(db):
+    _book(db, "Inside", 5)
+    card, _ = _card(_render(db))
+    assert "no outcome recorded" not in card
+
+
+def test_a_booking_with_an_unreadable_date_does_not_break_the_page(db):
+    """
+    days_away is None when the date will not parse, and the Jinja `le` filter
+    raises on None. The card is the only path that partitions on it.
+    """
+    company = "Garbled"
+    db.upsert_job({"company": company, "position_title": "Engineer", "link": company,
+                   "date_added": "2026-08-01", "status": "Phone Screen"})
+    db.add_interview(company=company, date_added="2026-08-01", position_title="Engineer",
+                     link=company, interview_type="recruiter_screen",
+                     scheduled_date="whenever")
+    card, table = _card(_render(db))
+    # Rendering at all is the assertion; before the guard this raised in Jinja.
+    assert "1 booked later" in card
+    assert "Garbled" not in table
 
 
 def test_the_empty_state_stays_one_line(db):
