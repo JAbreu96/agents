@@ -6,6 +6,8 @@ Usage:
     from src.jobs_db import get_job, get_followup_log, update_followup_log, upsert_job, delete_job
 """
 
+import contextlib
+import contextvars
 import csv
 import io
 import os
@@ -270,9 +272,122 @@ def _ensure_schema(conn, path: Optional[str] = None) -> None:
         _SCHEMA_ENSURED.add(path)
 
 
+class _Scope:
+    """
+    One connection and one jobs snapshot, shared for the life of a scope.
+
+    The connection is opened on first use, not on entry. Handlers that never
+    touch the database -- the two that only render a template -- would otherwise
+    pay ~84ms to open one and throw it away, and laziness is what lets the web
+    app wrap *every* request without checking first.
+    """
+
+    def __init__(self, create: bool = False):
+        self._create = create
+        self._conn = None
+        self.opened = False
+        self.jobs = None      # memoised _stats_jobs payload; None means not fetched
+
+    @property
+    def conn(self):
+        if not self.opened:
+            self._conn = _open_connection(create=self._create)
+            self.opened = True
+        return self._conn
+
+    def close(self) -> None:
+        if self.opened and self._conn is not None:
+            self._conn.close()
+
+    def invalidate(self) -> None:
+        self.jobs = None
+
+
+_SCOPE: contextvars.ContextVar = contextvars.ContextVar("jobs_db_scope", default=None)
+
+# Anything that is not a read invalidates the snapshot. A verb test rather than
+# real dependency tracking: every write in this module is a plain
+# INSERT/UPDATE/DELETE through a handful of helpers, so the verb is enough.
+_READ_VERBS = ("select", "pragma", "with")
+
+
+class _ScopedConnection:
+    """
+    The shared connection, handed to callers that each believe they own one.
+
+    close() is a no-op, and that is the whole point rather than a nicety. Every
+    helper here closes its connection in a `finally`, so the first one to finish
+    would close the connection the rest are still using -- and libSQL answers a
+    use-after-close with a Rust PanicException, not a Python exception, which no
+    caller can catch. The real connection is closed once, when the scope exits.
+    """
+
+    def __init__(self, scope: _Scope):
+        self._scope = scope
+
+    def execute(self, *args, **kwargs):
+        sql = str(args[0]).lstrip() if args else ""
+        if not sql[:6].lower().startswith(_READ_VERBS):
+            self._scope.invalidate()
+        return self._scope.conn.execute(*args, **kwargs)
+
+    def close(self) -> None:
+        pass
+
+    def __getattr__(self, name):
+        return getattr(self._scope.conn, name)
+
+
+@contextlib.contextmanager
+def shared_connection(create: bool = False):
+    """
+    Reuse one connection for everything called inside the block.
+
+    A remote connect costs ~84ms, and the helpers here open one apiece: rendering
+    /insights called seven of them and opened eleven connections, ~2.1s of the
+    4.6s the page took. Importing is worse -- upsert_job connects per row, so a
+    101-row import spent 8.5s connecting.
+
+    Opt-in on purpose. Outside a block `_connect()` behaves exactly as it always
+    has, so the 21 helpers, the MCP server and every script are unaffected until
+    someone wraps them deliberately. Long-running loops that idle between writes
+    should stay outside: a remote connection held open across minutes of network
+    waits is one that goes stale.
+
+    Nested blocks join the outer scope rather than opening a second connection.
+    """
+    existing = _SCOPE.get()
+    if existing is not None:
+        yield _ScopedConnection(existing)
+        return
+
+    scope = _Scope(create=create)
+    token = _SCOPE.set(scope)
+    try:
+        yield _ScopedConnection(scope)
+    finally:
+        _SCOPE.reset(token)
+        scope.close()
+
+
 def _connect(create: bool = False):
     """
     Opens a connection, building the schema on first use for this path.
+
+    Inside a shared_connection() block this hands back the block's connection
+    instead, so helpers that each open their own still end up sharing one.
+    """
+    scope = _SCOPE.get()
+    if scope is not None:
+        if scope.conn is None:      # local file missing and create=False
+            return None
+        return _ScopedConnection(scope)
+    return _open_connection(create=create)
+
+
+def _open_connection(create: bool = False):
+    """
+    Really opens a connection, building the schema on first use for this path.
 
     `create` only means anything for SQLite, where a missing file is a real
     signal that nothing has been written yet. A remote database always exists,
@@ -669,6 +784,44 @@ def get_all_jobs(include_archived: bool = False) -> list[dict]:
         conn.close()
 
 
+def _stats_jobs(include_archived: bool = False) -> list[dict]:
+    """
+    The job rows the derived-stats helpers read, fetched at most once per scope.
+
+    Separate from get_all_jobs() for two reasons. It drops job_summary, which is
+    two thirds of the table by bytes and which none of the stats functions reads
+    -- 3521KB and 287ms becomes 978KB and 164ms. And inside a shared_connection()
+    it memoises, because funnel_stats, classify_interviews and job_silence_stats
+    each pulled the whole table independently: rendering /insights fetched the
+    same rows three times.
+
+    get_all_jobs() keeps returning every column, because the MCP server and the
+    importer do read job_summary.
+
+    Always fetches the archived rows too and filters here. The three callers want
+    different subsets, and one fetch plus a list comprehension beats a second
+    round trip.
+    """
+    scope = _SCOPE.get()
+    if scope is not None and scope.jobs is not None:
+        rows = scope.jobs
+    else:
+        conn = _connect()
+        if not conn:
+            return []
+        try:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT %s, archived FROM jobs ORDER BY date_added DESC"
+                % ", ".join(LIST_COLUMNS)).fetchall()]
+        finally:
+            conn.close()
+        if scope is not None:
+            scope.jobs = rows
+    if include_archived:
+        return list(rows)
+    return [r for r in rows if not r.get("archived")]
+
+
 def export_csv(jobs: list[dict], fileobj) -> None:
     """Writes `jobs` as CSV (COLUMNS as header) to the given file-like object."""
     writer = csv.DictWriter(fileobj, fieldnames=COLUMNS, extrasaction="ignore")
@@ -938,7 +1091,7 @@ def classify_interviews() -> list[dict]:
     status_by_key = {
         (j["company"], j["date_added"], j["position_title"], j["link"]):
             (j.get("status") or "").strip().lower()
-        for j in get_all_jobs(include_archived=True)
+        for j in _stats_jobs(include_archived=True)
     }
 
     by_job: dict[tuple, list[dict]] = {}
@@ -1097,7 +1250,7 @@ def funnel_stats() -> dict:
     # 60 days from the working table, but a funnel is a historical record and a
     # finished outcome is its most useful input — excluding them drops the
     # majority of outreach history and makes that path look inert.
-    jobs = get_all_jobs(include_archived=True)
+    jobs = _stats_jobs(include_archived=True)
 
     rounds = get_interviews()
     def _keys(types):
@@ -1678,7 +1831,7 @@ def classify_job_silence() -> list[dict]:
         conn.close()
 
     out = []
-    for job in get_all_jobs():
+    for job in _stats_jobs():
         status = (job.get("status") or "").strip().lower()
         if status in TERMINAL_FAIL_STATUSES or status in TERMINAL_WIN_STATUSES:
             continue
