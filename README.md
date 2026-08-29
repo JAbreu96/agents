@@ -73,12 +73,11 @@ The skills read and write to a single Google Sheet.
 
 4. Share the sheet with the service account email (found in your JSON key file under `client_email`). Give it **Editor** access.
 5. Copy the spreadsheet ID from the URL (`https://docs.google.com/spreadsheets/d/<ID>/edit`) and update it in:
-   - `.claude/skills/job-tracker/SKILL.md`
-   - `.claude/skills/job-tracker-dispatch/SKILL.md`
-   - `.claude/skills/outreach-email/SKILL.md`
-   - `.claude/skills/application-digest/SKILL.md`
-   - `.claude/skills/job-digest/SKILL.md`
    - `mcp_servers/job_tracker/sheet.py` (`SPREADSHEET_ID` constant)
+   - `scripts/sync_jobs_to_sqlite.py`
+   - `scripts/export_jobs_to_drive.py`
+
+   The skills no longer carry the ID; they reach the sheet through these.
 
 ### 5. Google Doc — resume (resume-review skill)
 
