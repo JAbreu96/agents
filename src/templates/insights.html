@@ -152,8 +152,10 @@
       evidence a round took place — invites get cancelled — so none of these counts toward
       any rate until it is marked as held.
     </div>
-    {% set soon = upcoming | selectattr("days_away", "le", upcoming_window) | list %}
-    {% set later = upcoming | rejectattr("days_away", "le", upcoming_window) | list %}
+    {% set dated = upcoming | rejectattr("days_away", "none") | list %}
+    {% set soon = dated | selectattr("days_away", "le", upcoming_window) | list %}
+    {% set later = dated | rejectattr("days_away", "le", upcoming_window) | list
+                   + (upcoming | selectattr("days_away", "none") | list) %}
     {% if soon %}
     <table>
       <thead><tr><th>Company</th><th>Role</th><th>Type</th><th>Date</th><th class="num">When</th></tr></thead>
@@ -179,9 +181,10 @@
     {% endif %}
     <div class="note">
       The {{ upcoming_window }}-day window narrows the table, never the truth: anything
-      booked further out is counted on the line above. A booking whose date has passed
-      with no outcome recorded is not upcoming and is not listed here — it is still
-      retrievable from <code>/api/interviews/upcoming?include_past=1</code>.
+      booked further out is counted on the line above. A booking whose date has already
+      passed is not upcoming and never appears in this table — it is counted below
+      instead, because a round that happened and was never marked held is the one thing
+      this page must not lose track of.
     </div>
     {% elif later %}
     <p class="muted" style="font-size:13px;margin:0;">
@@ -190,6 +193,16 @@
     </p>
     {% else %}
     <p class="muted" style="font-size:13px;margin:0;">Nothing booked.</p>
+    {% endif %}
+    {% if past_bookings %}
+    <p class="muted" style="font-size:13px;margin:8px 0 0;">
+      <span class="rate bad">{{ past_bookings | length }}</span>
+      booked before today with no outcome recorded —
+      {{ past_bookings[:3] | map(attribute="company") | join(", ") }}{% if past_bookings | length > 3 %},
+      and {{ (past_bookings | length) - 3 }} more{% endif %}.
+      Mark each one held so it counts toward a rate, or
+      <a href="/api/interviews/upcoming?include_past=1">list them all</a>.
+    </p>
     {% endif %}
     {% if missing_rounds %}
     <p class="muted" style="font-size:13px;margin:8px 0 0;">

@@ -7,6 +7,11 @@ CONFIRMED, Wednesday, September 2, 2026, 11:45 AM to 12:15 PM EDT" while the
 "Coming up" card on Insights, which reads the interviews table, shows every
 screen except that one.
 
+Note the card has since become future-only: a row this writes with a
+`scheduled_date` that has already gone by is counted on the card's "no outcome
+recorded" line rather than listed in the table. Still visible, still needs
+`mark_interview_occurred()` -- just not where this docstring originally implied.
+
 The cause is upstream and fixed separately: nothing was allowed to write
 `interviews.scheduled_date`. Triage was told to record a round "only with
 occurred_date -- never a scheduled-but-not-yet-held invite", the GUI returned a

@@ -80,6 +80,7 @@ def test_a_full_insights_render_stays_under_a_statement_budget(counting):
     jobs_db.get_recruiter_jobs()
     jobs_db.recruiter_coverage()
     jobs_db.upcoming_interviews(include_past=True)
+    jobs_db.jobs_missing_interview_rows()
 
     assert len(counting) <= 30, (
         f"an /insights render now costs {len(counting)} statements; "
