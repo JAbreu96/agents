@@ -1,0 +1,219 @@
+/*
+ * The styling the table view and the kanban board share.
+ *
+ * jobs.html and kanban.html render the same job through the same field
+ * builders (src/static/job_fields.js), so they had grown two copies of every
+ * rule those builders depend on -- 58 of them, byte-identical -- plus two
+ * copies of the page chrome and the colour tokens. Two copies drift: the
+ * copies of `.company-editable` and `.recruiter-select` already had.
+ *
+ * What lives here is only what was already identical in both. Where the two
+ * views genuinely differ -- the board's cards are denser, its fields sit on
+ * --bg rather than --card -- the rule stays in that page's own <style> block,
+ * which is loaded after this file and so still wins.
+ *
+ * insights.html is not a consumer. It carries a data-visualisation palette
+ * (--good, --bad, --grid, --axis) and a different type scale, and shares only
+ * three trivial rules with these two; folding it in would mean reconciling
+ * those differences rather than removing duplication.
+ */
+
+:root {
+  color-scheme: light dark;
+  --bg: #f7f7f8;
+  --card: #ffffff;
+  --border: #e2e2e6;
+  --text: #1d1d1f;
+  --muted: #6b6b74;
+  --accent: #3457d5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16161a;
+    --card: #1f1f24;
+    --border: #303038;
+    --text: #eaeaef;
+    --muted: #9a9aa5;
+    --accent: #6f8dff;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+header {
+  padding: 20px 28px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+h1 { font-size: 18px; margin: 0; }
+.stats { color: var(--muted); font-size: 13px; }
+.goal-badge { color: var(--muted); font-size: 13px; }
+.goal-badge.goal-met { color: #2e9e4f; font-weight: 600; }
+nav.view-nav { display: flex; gap: 4px; }
+nav.view-nav a {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  text-decoration: none;
+  color: var(--muted);
+}
+nav.view-nav a.active { background: var(--accent); color: #fff; }
+nav.view-nav a:not(.active):hover { background: var(--bg); }
+.controls {
+  padding: 14px 28px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+input[type="search"] { flex: 1; min-width: 200px; }
+.date-filter { display: flex; align-items: center; gap: 6px; }
+.date-filter span { color: var(--muted); font-size: 13px; }
+button.linklike {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 7px 4px;
+}
+/* Ties on specificity with the board's `.company-editable:focus`, which is
+   still declared after this file loads -- the same winner as before. */
+.company-editable:hover { outline: 1px dashed var(--accent); }
+a.company-link-icon:hover { text-decoration: underline; }
+.delete-job-btn:hover { background: #d9534f; color: #fff; }
+.saved-flash { animation: flash 0.6s ease; }
+.markdown-field-header { display: flex; justify-content: space-between; align-items: center; }
+.markdown-rendered { white-space: normal; line-height: 1.4; }
+.markdown-rendered p { margin: 0 0 8px; }
+.markdown-rendered p:last-child { margin-bottom: 0; }
+.markdown-rendered ul { margin: 0 0 8px; padding-left: 20px; }
+.markdown-rendered h4 { margin: 10px 0 4px; font-size: 13px; }
+.markdown-rendered code { background: rgba(127,127,127,0.15); padding: 1px 4px; border-radius: 3px; }
+.markdown-expand-btn { align-self: flex-start; padding-left: 0; }
+.non-date-value .raw-text { flex: 1; color: var(--text); }
+.non-date-value button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--accent);
+  font-size: 11px;
+  padding: 3px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.followup-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.followup-chip.non-date { color: var(--muted); font-style: italic; }
+/* Dashed for a link inbox-triage made, so the rows you can freely change are
+   distinguishable from the ones an override would be needed to move. */
+.recruiter-pill.from-triage { border-style: dashed; }
+.recruiter-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.recruiter-current { font-weight: 600; }
+.recruiter-provenance { color: var(--muted); font-size: 12px; font-style: italic; }
+.recruiter-new { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.recruiter-new input { padding: 4px 6px; }
+.followup-chip button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 999px;
+}
+.followup-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.followup-add button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--accent);
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.followup-add button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+button.primary:hover { opacity: 0.9; }
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 100;
+}
+.modal-backdrop.hidden { display: none; }
+.modal-panel {
+  background: var(--card);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 520px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  padding: 20px 22px 22px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.modal-close:hover { background: var(--bg); color: var(--text); }
+.modal-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+.modal-field label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+.interview-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.interview-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
+}
+.interview-empty { font-size: 13px; color: var(--muted); }
+.interview-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.interview-error { color: #d64545; font-size: 12px; margin-top: 6px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.modal-error { color: #d64545; font-size: 12px; margin-bottom: 10px; display: none; }
