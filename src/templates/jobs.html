@@ -32,6 +32,31 @@
     position: sticky;
     top: 0;
   }
+  /* The header button inherits the th's type so the column still reads as a
+     label; only the caret and the pointer say it is clickable. */
+  button.sort-header {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    text-transform: inherit;
+    letter-spacing: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  button.sort-header:hover { color: var(--text); }
+  button.sort-header::after {
+    content: '';
+    font-size: 9px;
+    opacity: 0.6;
+  }
+  th[aria-sort="ascending"] button.sort-header::after { content: '\25B2'; }
+  th[aria-sort="descending"] button.sort-header::after { content: '\25BC'; }
+  th[aria-sort="ascending"] button.sort-header,
+  th[aria-sort="descending"] button.sort-header { color: var(--accent); }
   tr.job-row { cursor: pointer; }
   tr.job-row:hover { background: var(--bg); }
   tr.detail-row td { background: var(--bg); cursor: default; }
@@ -309,11 +334,11 @@
     <thead>
       <tr>
         <th style="width:20px;"></th>
-        <th>Company</th>
-        <th>Title</th>
-        <th>Location</th>
-        <th>Date Added</th>
-        <th>Status</th>
+        <th aria-sort="none"><button type="button" class="sort-header" data-sort="company">Company</button></th>
+        <th aria-sort="none"><button type="button" class="sort-header" data-sort="title">Title</button></th>
+        <th aria-sort="none"><button type="button" class="sort-header" data-sort="location">Location</button></th>
+        <th aria-sort="none"><button type="button" class="sort-header" data-sort="date_added">Date Added</button></th>
+        <th aria-sort="none"><button type="button" class="sort-header" data-sort="status">Status</button></th>
       </tr>
     </thead>
     <tbody id="jobsBody"></tbody>
@@ -326,6 +351,8 @@
 const STATUS_VALUES = {{ status_values | tojson }};
 const INTERVIEW_TYPES = {{ interview_types|tojson }};
 let allJobs = [];
+/* null means the table keeps the order the API sent, which is how it loads. */
+let sortState = null;
 
 // The field builders live in static/job_fields.js so the kanban modal can use
 // the same ones. Aliased to bare names here because the rest of this file --
@@ -432,6 +459,12 @@ function render() {
     return haystack.includes(q);
   });
 
+  // Sorted after filtering, and on a copy: allJobs is the API's order, which
+  // is what the table falls back to when the sort is cleared.
+  const rows = sortState
+    ? filtered.slice().sort(JobFields.compareJobs(sortState.column, sortState.direction))
+    : filtered;
+
   document.getElementById('stats').textContent = `${filtered.length} of ${allJobs.length} jobs`;
   document.getElementById('emptyState').style.display = filtered.length ? 'none' : 'block';
 
@@ -440,7 +473,7 @@ function render() {
   const tbody = document.getElementById('jobsBody');
   tbody.innerHTML = '';
 
-  for (const job of filtered) {
+  for (const job of rows) {
     const key = rowKey(job);
 
     const mainRow = document.createElement('tr');
@@ -802,6 +835,26 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.getElementById('search').addEventListener('input', render);
+function paintSortHeaders() {
+  const state = { asc: 'ascending', desc: 'descending' };
+  document.querySelectorAll('.sort-header').forEach(btn => {
+    const active = sortState && sortState.column === btn.dataset.sort;
+    btn.closest('th').setAttribute(
+      'aria-sort', active ? state[sortState.direction] : 'none');
+  });
+}
+
+document.querySelectorAll('.sort-header').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const column = btn.dataset.sort;
+    const current = sortState && sortState.column === column ? sortState.direction : null;
+    const direction = JobFields.nextSortDirection(current);
+    sortState = direction ? { column, direction } : null;
+    paintSortHeaders();
+    render();
+  });
+});
+
 document.getElementById('statusFilter').addEventListener('change', render);
 document.getElementById('recruiterFilter').addEventListener('change', render);
 document.getElementById('dateFrom').addEventListener('change', render);

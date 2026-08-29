@@ -76,6 +76,53 @@ const JobFields = (function () {
     };
   }
 
+  /*
+   * The columns the table can be sorted by, and the job field each reads.
+   *
+   * Lives here rather than in jobs.html so the comparison is testable: the
+   * template's script is not loaded by any test, this file is.
+   */
+  const SORT_COLUMNS = {
+    company: 'company',
+    title: 'position_title',
+    location: 'location',
+    date_added: 'date_added',
+    status: 'status',
+  };
+
+  /*
+   * Compares two jobs by one column, for Array.prototype.sort.
+   *
+   * A blank sorts last in both directions. Descending by date should answer
+   * "the most recent first", and a job with no date is not the oldest one --
+   * it is the one nobody recorded a date for, which belongs at the end either
+   * way. The same reading applies to a missing status or location.
+   *
+   * Dates are ISO-8601, so a plain string comparison already orders them.
+   * Everything else compares numerically-aware and case-insensitively, so
+   * "Series B" sorts after "Series A" and before "Series 10".
+   */
+  function compareJobs(column, direction) {
+    const field = SORT_COLUMNS[column];
+    if (!field) return () => 0;
+    const sign = direction === 'desc' ? -1 : 1;
+    return (a, b) => {
+      const x = (a[field] || '').trim();
+      const y = (b[field] || '').trim();
+      if (!x && !y) return 0;
+      if (!x) return 1;
+      if (!y) return -1;
+      return sign * x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' });
+    };
+  }
+
+  /* asc -> desc -> off, so a click can always undo itself. */
+  function nextSortDirection(current) {
+    if (current === 'asc') return 'desc';
+    if (current === 'desc') return null;
+    return 'asc';
+  }
+
   function renderMarkdownInto(container, raw) {
     container.innerHTML = '';
     const lines = (raw || '').split('\n');
@@ -982,6 +1029,9 @@ const JobFields = (function () {
     parseFollowupLog,
     serializeFollowupLog,
     jobKeyFields,
+    SORT_COLUMNS,
+    compareJobs,
+    nextSortDirection,
     renderMarkdownInto,
     appendInlineMarkdown,
     checkMarkdownOverflow,
