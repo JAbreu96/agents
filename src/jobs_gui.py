@@ -22,6 +22,7 @@ from flask import Flask, Response, g, jsonify, redirect, render_template, reques
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.job_agent import JobTrackerAgent  # noqa: E402
 from src.jobs_db import (  # noqa: E402
+    allow_remote_writes,
     INTERVIEW_TYPES,
     LIST_COLUMNS,
     STATUS_ORDER,
@@ -721,4 +722,8 @@ def api_delete_job():
 
 
 if __name__ == "__main__":
+    # The GUI is the tracker's main write surface -- every interview row is added
+    # here. Declared at launch, not at import, so `from src import jobs_gui` in a
+    # test or a scratch script does not inherit the permission.
+    allow_remote_writes()
     app.run(port=5151, debug=True)

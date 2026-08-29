@@ -23,6 +23,7 @@ from bs4 import BeautifulSoup
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.jobs_db import (  # noqa: E402
+    allow_remote_writes,
     COLUMNS, _use_libsql, get_all_jobs, shared_connection, status_rank,
     update_job_fields, upsert_job
 )
@@ -496,4 +497,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # A backfill exists to change the tracker, so it declares itself.
+    # Every one of these defaults to a dry run; the guard is the second lock.
+    allow_remote_writes()
     raise SystemExit(main())
