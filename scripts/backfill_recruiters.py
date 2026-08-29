@@ -200,4 +200,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # A backfill exists to change the tracker, so it declares itself.
+    # Every one of these defaults to a dry run; the guard is the second lock.
+    jobs_db.allow_remote_writes()
     raise SystemExit(main())

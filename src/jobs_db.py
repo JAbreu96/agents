@@ -32,7 +32,14 @@ from dotenv import load_dotenv
 # unset it deliberately, as tests/conftest.py does) still wins.
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"), override=False)
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "jobs.db")
+# JOBS_DB_PATH points this at a different SQLite file -- what
+# scripts/clone_remote_db.py tells you to set so a verification run writes to a
+# snapshot instead of the tracker. It has no effect while TURSO_DATABASE_URL is
+# set: a remote connection ignores DB_PATH entirely, which is the trap that put
+# ten invented rows into production. Unset the Turso vars as well as setting
+# this, exactly as the clone script prints.
+DB_PATH = os.environ.get("JOBS_DB_PATH", "").strip() or os.path.join(
+    os.path.dirname(__file__), "..", "data", "jobs.db")
 
 COLUMNS = [
     "company", "position_title", "job_summary", "location", "link",
@@ -149,6 +156,20 @@ def _migrate_key(conn: sqlite3.Connection) -> None:
 # does provide.
 
 def _use_libsql() -> bool:
+    """
+    Whether this process is pointed at the shared remote tracker.
+
+    JOBS_DB_PATH wins. It is an explicit "use this file", and a file and a
+    remote server cannot both be the database -- so naming one settles it.
+
+    That precedence is not a nicety. `load_dotenv()` runs at import and puts
+    TURSO_DATABASE_URL back, so `env -u TURSO_DATABASE_URL` does NOT disarm the
+    remote: the variable is unset when the shell hands over and set again a
+    moment later. Anyone reaching for a local file needs something dotenv cannot
+    undo, and this is it.
+    """
+    if os.environ.get("JOBS_DB_PATH", "").strip():
+        return False
     return bool(os.environ.get("TURSO_DATABASE_URL", "").strip())
 
 
@@ -213,14 +234,91 @@ class _ShimCursor:
         return getattr(self._cursor, name)
 
 
+class RemoteWriteBlocked(RuntimeError):
+    """
+    Raised when something tries to change the remote database without saying so.
+
+    The remote database is the real job tracker -- the one the GUI, the MCP
+    server and the scheduled runs all share. A throwaway verification script
+    that reaches it by accident does not corrupt a fixture, it corrupts the
+    record. This has happened: a script set DB_PATH to a temp file, but
+    TURSO_DATABASE_URL was live in .env, DB_PATH is ignored whenever it is, and
+    ten invented rows went into the tracker before anyone noticed.
+
+    So remote writes are refused unless an entry point has declared itself by
+    setting JOBS_DB_ALLOW_REMOTE_WRITES=1. Reads are never blocked.
+    """
+
+
+# Only data-changing verbs. DDL is deliberately absent: _ensure_schema runs
+# CREATE/ALTER on every connect, including read-only ones, so blocking those
+# would make the guard fire on import.
+_REMOTE_WRITE_VERBS = ("insert", "update", "delete", "replace")
+
+# Set only while _ensure_schema runs. One migration moves rows between tables
+# with INSERT INTO ... SELECT, which is a real write that has to be allowed for
+# a connection to open at all.
+_IN_MIGRATION = False
+
+
+def remote_writes_allowed() -> bool:
+    """True when an entry point has declared it intends to write to production."""
+    return os.environ.get("JOBS_DB_ALLOW_REMOTE_WRITES", "").strip().lower() \
+        not in ("", "0", "false", "no")
+
+
+def allow_remote_writes() -> None:
+    """
+    Declares this process an entry point that may change the live tracker.
+
+    Call it in an entry point's `__main__`, never at import: importing jobs_db
+    must stay safe for anything that only wants to read. The env var is what the
+    guard reads, so a child process inherits the permission -- which is what the
+    MCP server and the scheduled runs rely on.
+    """
+    os.environ["JOBS_DB_ALLOW_REMOTE_WRITES"] = "1"
+
+
+def _guard_remote_write(sql) -> None:
+    # _use_libsql(), not "is a shim": the shim is a row adapter and the tests
+    # put one over a local file. What makes a write dangerous is the connection
+    # pointing at the shared remote database, and that is this env var alone.
+    if not _use_libsql() or _IN_MIGRATION or remote_writes_allowed():
+        return
+    if not str(sql).lstrip().lower().startswith(_REMOTE_WRITE_VERBS):
+        return
+    raise RemoteWriteBlocked(
+        f"refusing to run {str(sql).split()[0].upper()} against the remote database.\n"
+        "This is the live job tracker, not a fixture. To verify a write, take a "
+        "copy and point at that:\n"
+        "    python scripts/clone_remote_db.py\n"
+        "If this really is an entry point that should write to production, set "
+        "JOBS_DB_ALLOW_REMOTE_WRITES=1 in its environment."
+    )
+
+
 class _ShimConnection:
-    """Wraps a libSQL connection so execute() yields shimmed cursors."""
+    """
+    Wraps a libSQL connection so execute() yields shimmed cursors.
+
+    Also the one place every remote statement passes through, which makes it the
+    only honest place to refuse a write -- a guard on the helper functions would
+    miss a hand-written conn.execute("DELETE ..."), and that is exactly the
+    shape of the accident it exists to prevent.
+    """
 
     def __init__(self, conn):
         self._conn = conn
 
     def execute(self, *args, **kwargs) -> _ShimCursor:
+        if args:
+            _guard_remote_write(args[0])
         return _ShimCursor(self._conn.execute(*args, **kwargs))
+
+    def executemany(self, *args, **kwargs):
+        if args:
+            _guard_remote_write(args[0])
+        return self._conn.executemany(*args, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self._conn, name)
@@ -246,6 +344,15 @@ def _ensure_schema(conn, path: Optional[str] = None) -> None:
     # TURSO_DATABASE_URL is set.
     remote = isinstance(conn, _ShimConnection)
 
+    global _IN_MIGRATION
+    _IN_MIGRATION = True
+    try:
+        _ensure_schema_unguarded(conn, path, remote)
+    finally:
+        _IN_MIGRATION = False
+
+
+def _ensure_schema_unguarded(conn, path: Optional[str], remote: bool) -> None:
     # busy_timeout is per-connection, so it is set every time regardless. It is
     # one statement; the other twenty are what this guard exists to skip.
     if not remote:

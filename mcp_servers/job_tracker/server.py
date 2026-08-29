@@ -584,4 +584,7 @@ def record_recruiter_reply(identity: str, source: str = "email",
 
 
 if __name__ == "__main__":
+    # Half these tools write, and the scheduled skills reach the tracker through
+    # this server, so it is a declared entry point.
+    jobs_db.allow_remote_writes()
     mcp.run()

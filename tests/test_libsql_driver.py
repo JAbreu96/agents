@@ -199,6 +199,11 @@ def test_a_merge_updates_in_place_on_libsql(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("TURSO_DATABASE_URL", str(tmp_path / "cloud.db"))
     monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    # TURSO_DATABASE_URL is what marks a connection as production, so setting it
+    # -- even at a temp file -- arms the remote-write guard. This test writes on
+    # purpose through that exact path, so it declares itself the way a real entry
+    # point does.
+    monkeypatch.setenv("JOBS_DB_ALLOW_REMOTE_WRITES", "1")
     jobs_db._reset_schema_cache()
 
     key = dict(company="Acme", date_added="2026-01-01",

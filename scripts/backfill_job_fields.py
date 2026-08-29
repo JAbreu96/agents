@@ -37,6 +37,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.job_agent import JobTrackerAgent  # noqa: E402
 from src.jobs_db import (  # noqa: E402
+    allow_remote_writes,
     _connect,
     delete_job_by_key,
     status_rank,
@@ -319,4 +320,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # A backfill exists to change the tracker, so it declares itself.
+    # Every one of these defaults to a dry run; the guard is the second lock.
+    allow_remote_writes()
     raise SystemExit(main())
