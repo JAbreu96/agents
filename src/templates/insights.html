@@ -782,22 +782,30 @@ document.querySelectorAll('tr[data-recruiter-id]').forEach(row => {
   });
 
   delBtn.addEventListener('click', async () => {
-    const roles = Number(row.dataset.roles || 0);
-    const replies = Number(row.dataset.replies || 0);
     const who = nameCell.textContent.trim();
-    // Naming the messages matters: they go too, and they are the only record of
-    // the conversation. Leaving them would orphan them against a dead id and
-    // triage could never re-import them.
+
+    // Both numbers come from the server before anything goes. The counts on
+    // this row cannot answer it: `replies` is reply_count, which filters
+    // direction = 'reply' and so omits every outreach message the delete would
+    // take. Understating what an unrecoverable delete destroys is the one thing
+    // this dialog exists to prevent.
+    const counts = await postJSON('/api/recruiters/delete',
+                                  { recruiter_id: id, dry_run: true });
+    if (!counts) return;
+
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
     const parts = [];
-    if (roles) parts.push(`unassign ${roles} job${roles === 1 ? '' : 's'}`);
-    parts.push('delete every recorded message for them');
+    if (counts.jobs) parts.push(`unassign ${plural(counts.jobs, 'job')}`);
+    parts.push(`delete ${plural(counts.messages, 'recorded message')}`);
     if (!confirm(
       `Delete ${who}?\n\nThis will ${parts.join(' and ')}. `
       + 'Recorded messages cannot be re-imported from mail afterwards.\n\nContinue?'
     )) return;
+
     const res = await postJSON('/api/recruiters/delete', { recruiter_id: id });
     if (res) {
-      alert(`Deleted ${who}: ${res.jobs} job link(s) and ${res.messages} message(s) removed.`);
+      alert(`Deleted ${who}: ${plural(res.jobs, 'job link')} and `
+            + `${plural(res.messages, 'message')} removed.`);
       location.reload();
     }
   });

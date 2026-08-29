@@ -542,15 +542,17 @@ def api_delete_recruiter():
     """
     Deletes a recruiter with its links and its messages.
 
-    The messages go too on purpose — see delete_recruiter. The counts come back
-    so the confirm dialog can name what it destroyed rather than saying "done".
+    The messages go too on purpose — see delete_recruiter.
+
+    dry_run: true counts without deleting, which is how the confirm dialog names
+    both numbers before the user commits to an delete that cannot be undone.
     """
     payload = request.get_json(force=True) or {}
     recruiter_id = _recruiter_id(payload)
     if recruiter_id is None:
         return jsonify({"error": "recruiter_id is required"}), 400
 
-    res = delete_recruiter(recruiter_id)
+    res = delete_recruiter(recruiter_id, dry_run=bool(payload.get("dry_run")))
     if not res.get("ok"):
         return jsonify({"error": res.get("error", "Delete failed.")}), 404
     return jsonify(res)

@@ -317,3 +317,20 @@ def test_assigning_an_unknown_recruiter_is_404_not_a_silent_success(client):
     job = next(j for j in client.get("/api/jobs").get_json()
                if j["company"] == _keys(client)["company"])
     assert job["recruiter_id"] is None
+
+
+def test_delete_dry_run_previews_without_destroying(client):
+    rid = client.post("/api/recruiters/add", json={
+        "name": "Jo", "email": "jo@agency.com"}).get_json()["recruiter"]["id"]
+    client.post("/api/jobs/recruiter", json={**_keys(client), "recruiter_id": rid})
+    jobs_db.record_recruiter_message(rid, "inbound", "2026-08-20", message_id="M1")
+
+    preview = client.post("/api/recruiters/delete",
+                          json={"recruiter_id": rid, "dry_run": True}).get_json()
+    assert (preview["jobs"], preview["messages"]) == (1, 1)
+    assert any(r["id"] == rid for r in jobs_db.get_recruiters())   # still there
+
+    real = client.post("/api/recruiters/delete",
+                       json={"recruiter_id": rid}).get_json()
+    assert (real["jobs"], real["messages"]) == (preview["jobs"], preview["messages"])
+    assert not any(r["id"] == rid for r in jobs_db.get_recruiters())
