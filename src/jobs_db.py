@@ -1749,7 +1749,17 @@ def recruiter_coverage() -> dict:
     captured = 0
     if conn:
         try:
-            captured = conn.execute("SELECT COUNT(*) AS n FROM recruiter_jobs").fetchone()["n"]
+            # DISTINCT job key, not COUNT(*): recruiter_jobs is many-to-many and
+            # two agencies pitching the same role is not two roles. GTE arrived
+            # from Jack Dahler and Maddison Jonas within a day of each other, and
+            # counting rows would report it twice against a "suspected uncaptured"
+            # figure that counts each role once -- two numbers side by side
+            # measuring different things.
+            captured = conn.execute(
+                "SELECT COUNT(*) AS n FROM ("
+                "  SELECT DISTINCT company, date_added, position_title, link"
+                "  FROM recruiter_jobs)"
+            ).fetchone()["n"]
         finally:
             conn.close()
     return {"captured": captured, "suspected_uncaptured": len(unlinked), "rows": unlinked}
@@ -1901,6 +1911,14 @@ def job_silence_stats() -> dict:
         "ghosted_after_days": GHOSTED_AFTER_DAYS,
         "no_response_after_days": NO_RESPONSE_AFTER_DAYS,
     }
+
+
+# How far ahead the Insights card shows in its table. A horizon for attention,
+# not a filter: rounds past it are counted on an overflow line rather than
+# dropped, because a booking nobody can see is the same problem as a booking
+# nobody made. Overdue rounds ignore this entirely -- they are the ones most
+# likely to be something forgotten.
+UPCOMING_WINDOW_DAYS = 14
 
 
 def upcoming_interviews(include_past: bool = False) -> list[dict]:

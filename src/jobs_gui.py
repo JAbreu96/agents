@@ -25,6 +25,7 @@ from src.jobs_db import (  # noqa: E402
     INTERVIEW_TYPES,
     LIST_COLUMNS,
     STATUS_ORDER,
+    UPCOMING_WINDOW_DAYS,
     _connect,
     _WRITE_EXC,
     shared_connection as _shared_connection,
@@ -381,6 +382,7 @@ def insights_view():
         coverage=recruiter_coverage(),
         silence=job_silence_stats(),
         upcoming=upcoming_interviews(include_past=True),
+        upcoming_window=UPCOMING_WINDOW_DAYS,
     )
 
 

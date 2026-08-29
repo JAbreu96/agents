@@ -117,7 +117,7 @@ Assign each thread exactly one category, judged on its **newest message**.
 | `deadline` | Something has a clock: assessment expiry, incomplete application, scheduled interview | Gate |
 | `rejection` | `detect_rejection` finds language in the message's own text | Update a tracked row, silent. Never creates one |
 | `auto_ack` | "Thank you for applying", "we've received your application", Indeed/Workday/Greenhouse receipts | Update a tracked row. **Never create one** — untracked receipts are reported in Step 8, not written |
-| `recruiter_outreach` | A staffing/agency recruiter pitching a role Joel never applied to | Tracker row; gate only if scored 60+ |
+| `recruiter_outreach` | A staffing/agency recruiter pitching a role Joel never applied to | **Always** record the recruiter; job row and gate only if scored 60+ |
 | `noise` | Job alerts, marketing, newsletters, Glassdoor/Dice/LinkedIn digests, security codes | Ignore entirely |
 
 **Identifying a human:** a named sender at a company domain, writing prose addressed to Joel,
@@ -240,9 +240,37 @@ It creates the job row at status `Tracking` with a deterministic synthetic link,
 **re-processing the same email updates rather than duplicating** — and it never downgrades a
 status that has since moved on.
 
+### The recruiter is always recorded; the job row is not
+
+Call it for **every** recruiter-sourced role, whatever the score. Who is contacting Joel is
+the thing the Recruiters card exists to show, and a cold blast still answers that.
+
+But only let it create a **job row** when the score clears 60 — the same bar the gate uses.
+InMail arrives at roughly 40 messages per six weeks, nearly all cold, and a row apiece buries
+the tracker in roles nobody is pursuing. For a sub-60 role, record the recruiter and the
+message and stop there.
+
+A sub-60 role that later turns real gets its row by hand. That is the same trade the tracker
+already makes everywhere else: it would rather be missing a row you can add than carry forty
+you have to ignore.
+
 **`identity` is not always the sender address.** LinkedIn InMail arrives from the shared relay
 `inmail-hit-reply@linkedin.com`; keying on that address would file every LinkedIn recruiter
-Joel ever hears from as one person. Use the profile slug from their message or profile link.
+Joel ever hears from as one person.
+
+For `linkedin`, use the **sender display name from the `From:` header**, lowercased with
+non-alphanumerics collapsed to hyphens — `Jack Dahler` becomes `jack-dahler`.
+
+This used to say "use the profile slug from their message or profile link", and **an InMail
+body contains no profile slug**. The only LinkedIn URL in one is the messaging thread. The
+rule was unfollowable, so the capture step was skipped every time and the recruiter's name
+ended up as prose in `contacts` instead: 40+ InMails since 14 July produced **zero** LinkedIn
+recruiter records, while nine tracked roles named their recruiter in a field no query reads.
+
+Not the thread id, though it is always present: that identifies the conversation, so the same
+recruiter opening a second thread becomes a second recruiter, each with one role — which is
+the exact number the Recruiters card exists to disprove. Two people who genuinely share a
+name will merge, and a merge is visible and fixable where a split is neither.
 
 If the same firm pitches again, that is a new role and a new call — never overwrite the old one.
 Two people at one agency (AceStack wrote from both `gautamk@` and `dhruvr@`) are two recruiters.
