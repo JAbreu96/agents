@@ -181,6 +181,75 @@ check('recruiterBadge marks a triage-linked recruiter apart from a typed one', (
   assert(triaged.title.includes('inbox-triage'), 'the triage badge does not say where it came from');
 });
 
+// --- sorting ---------------------------------------------------------------
+
+function jobs(...specs) {
+  return specs.map(([company, date_added, status]) => ({
+    company, date_added, status, position_title: '', location: '', link: '',
+  }));
+}
+
+check('SORT_COLUMNS names a job field for every sortable column', () => {
+  const sample = sampleJob();
+  for (const [column, field] of Object.entries(JobFields.SORT_COLUMNS)) {
+    assert(field in sample, `column ${column} reads a field no job has: ${field}`);
+  }
+});
+
+check('compareJobs orders ascending and descending', () => {
+  const rows = jobs(['Beta', '2026-01-02', 'Applied'], ['Alpha', '2026-01-03', 'Rejected']);
+  const asc = rows.slice().sort(JobFields.compareJobs('company', 'asc')).map(j => j.company);
+  const desc = rows.slice().sort(JobFields.compareJobs('company', 'desc')).map(j => j.company);
+  assertEqual(asc.join(','), 'Alpha,Beta');
+  assertEqual(desc.join(','), 'Beta,Alpha');
+});
+
+check('compareJobs sorts dates chronologically, not by digit', () => {
+  const rows = jobs(['A', '2026-01-09', ''], ['B', '2026-01-10', ''], ['C', '2025-12-31', '']);
+  const asc = rows.slice().sort(JobFields.compareJobs('date_added', 'asc')).map(j => j.company);
+  assertEqual(asc.join(','), 'C,A,B');
+});
+
+check('a blank sorts last in both directions', () => {
+  // A job with no date is not the oldest one; it is the one nobody recorded a
+  // date for, and it belongs at the end either way.
+  const rows = jobs(['A', '2026-01-02', ''], ['B', '', ''], ['C', '2026-01-01', '']);
+  const asc = rows.slice().sort(JobFields.compareJobs('date_added', 'asc')).map(j => j.company);
+  const desc = rows.slice().sort(JobFields.compareJobs('date_added', 'desc')).map(j => j.company);
+  assertEqual(asc.join(','), 'C,A,B');
+  assertEqual(desc.join(','), 'A,C,B');
+});
+
+check('whitespace counts as blank', () => {
+  const rows = jobs(['A', '   ', ''], ['B', '2026-01-01', '']);
+  const asc = rows.slice().sort(JobFields.compareJobs('date_added', 'asc')).map(j => j.company);
+  assertEqual(asc.join(','), 'B,A');
+});
+
+check('compareJobs ignores case and reads embedded numbers as numbers', () => {
+  const rows = jobs(['series 10', '', ''], ['Series 2', '', ''], ['SERIES 1', '', '']);
+  const asc = rows.slice().sort(JobFields.compareJobs('company', 'asc')).map(j => j.company);
+  assertEqual(asc.join(','), 'SERIES 1,Series 2,series 10');
+});
+
+check('an unknown column leaves the order untouched', () => {
+  const rows = jobs(['B', '', ''], ['A', '', ''], ['C', '', '']);
+  const same = rows.slice().sort(JobFields.compareJobs('nonsense', 'asc')).map(j => j.company);
+  assertEqual(same.join(','), 'B,A,C');
+});
+
+check('sorting is stable, so a tie keeps the order the API sent', () => {
+  const rows = jobs(['B', '2026-01-01', ''], ['A', '2026-01-01', ''], ['C', '2026-01-01', '']);
+  const asc = rows.slice().sort(JobFields.compareJobs('date_added', 'asc')).map(j => j.company);
+  assertEqual(asc.join(','), 'B,A,C');
+});
+
+check('nextSortDirection cycles asc, desc, then off', () => {
+  assertEqual(JobFields.nextSortDirection(null), 'asc');
+  assertEqual(JobFields.nextSortDirection('asc'), 'desc');
+  assertEqual(JobFields.nextSortDirection('desc'), null);
+});
+
 // --- the builders ----------------------------------------------------------
 
 function sampleJob() {
@@ -188,6 +257,7 @@ function sampleJob() {
     company: 'Acme',
     date_added: '2026-01-02',
     position_title: 'Developer',
+    location: 'Remote',
     link: 'https://example.invalid/jobs/1',
     status: 'Applied',
     notes: 'A note with **bold** in it.',
