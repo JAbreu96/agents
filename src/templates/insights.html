@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Insights</title>
 <script src="{{ url_for('static', filename='chart.umd.js') }}"></script>
+<script src="{{ url_for('static', filename='job_fields.js') }}"></script>
 <style>
   :root {
     color-scheme: light dark;
@@ -717,16 +718,13 @@ render();
 // DOM. The table carries role and reply counts per row, which is what lets the
 // delete confirm say what it is about to destroy before asking.
 
+// Shared with the job views -- see static/job_fields.js. The alert-on-failure
+// wrapper stays local: every call on this page treats a failure as an error to
+// show, where the job row has a 409 that is an expected answer.
 async function postJSON(url, body) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  let data = {};
-  try { data = await res.json(); } catch (e) { /* no body */ }
-  if (!res.ok) { alert(data.error || 'Request failed.'); return null; }
-  return data;
+  const res = await JobFields.postJSON(url, body);
+  if (!res.ok) { alert(res.data.error || 'Request failed.'); return null; }
+  return res.data;
 }
 
 const addToggle = document.getElementById('addRecruiterToggle');

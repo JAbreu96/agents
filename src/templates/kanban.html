@@ -497,6 +497,12 @@ const {
 });
 
 async function loadJobs() {
+  // No include_archived here, unlike the table, and that is the answer rather
+  // than an omission. The table passes it only when arriving from an Insights
+  // funnel tile, so that the rows it shows match the count just clicked. Every
+  // one of those tiles links to `/?stage=...` — the table. Nothing links into
+  // the board with a query string, so there is no drill-through for it to
+  // match, and the board stays what it looks like: the working set.
   const res = await fetch('/api/jobs');
   allJobs = await res.json();
   render();
